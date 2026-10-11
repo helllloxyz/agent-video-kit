@@ -65,9 +65,17 @@ def split_sections(text):
 
 
 def pack_sections(sections, max_chars):
-    """仅在完整小节之间切分；超长单节保持完整。"""
+    """只合并相邻完整小节；单节超限时报错，不改变章节边界。"""
     if max_chars is None:
         return sections
+    if max_chars <= 0:
+        raise ValueError("max_chars 必须大于 0")
+    for section_title, content in sections:
+        if len(content) > max_chars:
+            raise ValueError(
+                f"章节「{section_title}」共 {len(content)} 字符，超过 --max-chars {max_chars}；"
+                "只允许按 ## 章节切分，请调整原稿章节边界或显式提高字符上限。"
+            )
     chunks = []
     title = None
     parts = []
@@ -94,7 +102,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="输入 Markdown 文件路径（UTF-8）")
     parser.add_argument("-o", "--output-dir", type=Path, help="输出目录，默认：原文件名_split")
-    parser.add_argument("--max-chars", type=int, help="合并相邻小节的字符数目标；包含标点、空格和换行，不是 token 数；绝不拆开单节")
+    parser.add_argument("--max-chars", "--max-char", type=int, default=2000,
+                        help="每份最大字符数（默认 2000）；含标点、空格和换行；只按 ## 切分，单章超限时报错")
     parser.add_argument("--dry-run", action="store_true", help="只预览拆分结果，不写文件")
     args = parser.parse_args()
     if args.max_chars is not None and args.max_chars <= 0:
@@ -122,8 +131,6 @@ def main():
                     handle.write(content)
         for path, content in planned:
             print(f"{path.name}  {len(content)} 字符")
-            if args.max_chars and len(content) > args.max_chars:
-                print("  提示：这一小节超过字符数目标，已保持完整。", file=sys.stderr)
         print(f"{'预览' if args.dry_run else '已输出'} {len(chunks)} 份；目录：{output}")
     except (OSError, UnicodeError, ValueError) as error:
         parser.exit(1, f"错误：{error}\n")

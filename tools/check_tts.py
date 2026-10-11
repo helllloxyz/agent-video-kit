@@ -11,6 +11,7 @@
 """
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -140,7 +141,7 @@ def normalize_output(out):
     return "".join(ch for ch in text if not ch.isspace())
 
 
-def compare(parts, gaps, out_norm):
+def compare(parts, gaps, out_norm, alignment=None):
     errors = []
     pos = 0
     pending = None  # 前面待填的 gap 下标列表；'resync' 表示前一段比对失败
@@ -168,14 +169,40 @@ def compare(parts, gaps, out_norm):
             continue
         if isinstance(pending, list):
             assign_reading(gaps, pending, out_norm[pos:idx])
+            if alignment is not None:
+                alignment.append(replacement_span(gaps, pending, pos, idx, out_norm))
+        if alignment is not None:
+            alignment.append({"kind": "literal", "sourceLines": [lines[0], lines[-1]],
+                              "sourceText": lit, "ttsNormalizedRange": [idx, idx + len(lit)],
+                              "ttsNormalizedText": lit})
         pending = None
         pos = idx + len(lit)
 
     if isinstance(pending, list):
         assign_reading(gaps, pending, out_norm[pos:])
+        if alignment is not None:
+            alignment.append(replacement_span(gaps, pending, pos, len(out_norm), out_norm))
     elif pending is None and pos < len(out_norm):
         errors.append(f"输出末尾多出源文没有的文字：“{clip(out_norm[pos:], 40)}”")
     return errors
+
+
+def replacement_span(gaps, ids, start, end, out_norm):
+    group = [gaps[gid] for gid in ids]
+    return {"kind": "replacement", "sourceLines": [group[0].line,
+            max(g.line + g.text.count("\n") for g in group)],
+            "sourceText": " ".join(g.text for g in group),
+            "replacementKinds": [g.kind for g in group],
+            "ttsNormalizedRange": [start, end], "ttsNormalizedText": out_norm[start:end]}
+
+
+def output_offsets(out):
+    """与 normalize_output 同步，保留非空白正文字符在原始 TTS 中的偏移。"""
+    hidden = set()
+    for pattern in (PAUSE_RE, ALLOWED_TAG_RE):
+        for match in pattern.finditer(out):
+            hidden.update(range(match.start(), match.end()))
+    return [i for i, ch in enumerate(out) if i not in hidden and not ch.isspace()]
 
 
 def assign_reading(gaps, ids, reading):
@@ -224,7 +251,9 @@ def check_output_format(out):
                 if n == 0:
                     errors.append("文件开头是停顿标记")
                 elif n == len(pieces) - 1:
-                    errors.append("文件结尾是停顿标记")
+                    # 文末允许一个停顿；其后只能有空白，不能再跟语气标签或标点。
+                    if piece.strip():
+                        errors.append("文末停顿之后只能有空白")
                 else:
                     errors.append(f"第 {n} 个和第 {n + 1} 个停顿标记之间没有可发音文字")
 
@@ -262,13 +291,14 @@ def md_cell(s):
     return clip(s.replace("\n", " ").replace("|", "\\|"), 120)
 
 
-def check_pair(src_path, out_path):
+def check_pair(src_path, out_path, alignment_path=None):
     src = src_path.read_text(encoding="utf-8")
     out = out_path.read_text(encoding="utf-8")
     parts, gaps = parse_source(src)
     out_norm = normalize_output(out)
 
-    errors = compare(parts, gaps, out_norm)
+    alignment = []
+    errors = compare(parts, gaps, out_norm, alignment)
     fmt_errors, warnings = check_output_format(out)
     errors.extend(fmt_errors)
 
@@ -281,6 +311,22 @@ def check_pair(src_path, out_path):
     chars = len(out_norm)
     if total_tags / max(chars, 1000) * 1000 > TAG_DENSITY_LIMIT:
         warnings.append(f"语气标签密度偏高：{total_tags} 处 / {chars} 字")
+
+    if alignment_path is not None:
+        offsets = output_offsets(out)
+        for span in alignment:
+            start, end = span["ttsNormalizedRange"]
+            raw_start = offsets[start] if start < len(offsets) else len(out)
+            raw_end = offsets[end - 1] + 1 if end > start else raw_start
+            span["ttsRange"] = [raw_start, raw_end]
+            span["ttsText"] = out[raw_start:raw_end]
+        payload = {"source": str(src_path.resolve()), "tts": str(out_path.resolve()),
+                   "passed": not errors, "errors": errors, "warnings": warnings,
+                   "offsetUnit": "Python Unicode code points, zero-based, end-exclusive",
+                   "note": "正文按字符串顺序精确匹配；替换片段仍需人工审阅含义。此文件不含音频时间。",
+                   "segments": alignment}
+        alignment_path.parent.mkdir(parents=True, exist_ok=True)
+        alignment_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     lines = [f"## {src_path} → {out_path}", ""]
     lines.append(f"结果：{'通过' if not errors else f'未通过（{len(errors)} 个错误）'}")
@@ -335,6 +381,7 @@ def main():
     parser = argparse.ArgumentParser(description="对照源稿检查 MiniMax TTS 文本")
     parser.add_argument("source", type=Path, help="源 Markdown 文件或目录")
     parser.add_argument("output", type=Path, help="TTS 文本文件或输出目录")
+    parser.add_argument("--alignment-dir", type=Path, help="另存原文与 TTS 字符串对齐 JSON；无音频时间")
     args = parser.parse_args()
 
     if not args.source.exists():
@@ -347,7 +394,11 @@ def main():
             reports.append(f"## {src_path}\n\n结果：未通过（找不到输出文件 {out_path}）")
             all_ok = False
             continue
-        report, ok = check_pair(src_path, out_path)
+        alignment_path = None
+        if args.alignment_dir:
+            relative = Path(src_path.name) if args.source.is_file() else src_path.relative_to(args.source)
+            alignment_path = args.alignment_dir / relative.with_suffix(".alignment.json")
+        report, ok = check_pair(src_path, out_path, alignment_path)
         reports.append(report)
         all_ok = all_ok and ok
 

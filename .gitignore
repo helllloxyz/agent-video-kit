@@ -2,6 +2,10 @@
 .env.*
 !.env.example
 outputs/
+.local-deps/**
+!.local-deps/video/
+!.local-deps/video/package.json
+!.local-deps/video/package-lock.json
 __pycache__/
 *.py[cod]
 .DS_Store
