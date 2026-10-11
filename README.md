@@ -2,7 +2,7 @@
 
 供 Codex、DeepSeek harness 等 agent 使用的讲稿、配音与科普视频辅助项目。根目录 [AGENTS.md](AGENTS.md) 保留音频与视频两部分的职责和路由；模型执行具体任务时，再按需加载 [音频详细流程](docs/audio_workflow.md) 或 [视频详细流程](docs/video_workflow.md) 及对应 Prompt。
 
-讲稿检查与配音脚本仅使用 Python 3.9+ 标准库，无须启动网页或连接原项目数据库。视频渲染环境的配置与复用见 [视频详细流程](docs/video_workflow.md)。
+讲稿检查与配音脚本仅使用 Python 3.9+ 标准库，无须启动网页或连接数据库。视频渲染使用 Node.js 20+ 与 npm，安装与字体配置见 [视频详细流程](docs/video_workflow.md)。
 
 ## 配置
 
@@ -14,7 +14,7 @@ cd agent-video-kit
 cp .env.example .env
 ```
 
-在 `.env` 填写 `MINIMAX_API_KEY`。国内站沿用源项目默认接入地址；国际站账号还需设置 `MINIMAX_BASE_URL=https://api.minimax.io`。默认模型沿用源项目的 `speech-2.8-hd`，未指定音色时优先选择系统中文音色；可通过 `.env` 固定模型和音色。`.env` 与生成文件已被 `.gitignore` 排除。
+在 `.env` 填写 `MINIMAX_API_KEY`。默认使用国内站接入地址；国际站账号还需设置 `MINIMAX_BASE_URL=https://api.minimax.io`。默认模型为 `speech-2.8-hd`，未指定音色时优先选择系统中文音色；可通过 `.env` 固定模型和音色。`.env` 与生成文件已被 `.gitignore` 排除。
 
 ## 交给 agent 使用
 
@@ -41,7 +41,7 @@ cp .env.example .env
 | [AGENTS.md](AGENTS.md) | 音频/视频职责、默认任务路由及交接约定 |
 | [docs/audio_workflow.md](docs/audio_workflow.md) | 音频模型按需加载：拆分、转写、脚本对齐、合成、检查和音频交付 |
 | [docs/video_workflow.md](docs/video_workflow.md) | 视频执行步骤、共享环境、检查和交付规格 |
-| [docs/tts_rewrite_prompt.md](docs/tts_rewrite_prompt.md) | 从原 AGENTS.md 移出的 TTS 文稿适配规则，保留正文与公式转换约束 |
+| [docs/tts_rewrite_prompt.md](docs/tts_rewrite_prompt.md) | TTS 文稿适配规则、正文与公式转换约束 |
 | [docs/video_prompt.md](docs/video_prompt.md) | 科普视频的视觉风格、内容表达和画面节奏 |
 | [tools/minimax_tts.py](tools/minimax_tts.py) | MiniMax 请求、音频/字幕保存、时间轴、分镜表及响应恢复，也可作为 Python 模块调用 |
 | [tools/check_tts.py](tools/check_tts.py) | 朗读文本与原稿逐字核对和标签检查 |
@@ -51,9 +51,8 @@ cp .env.example .env
 | `outputs/` | 每次任务单独保存文本、音频、视频及过程记录 |
 | `.local-deps/video/` | 共享视频渲染依赖 |
 | `.local-deps/audio/` | 共享音频侧本地工具（如 `imageio_ffmpeg`） |
-| `tests/` | 本地模拟服务测试，无真实语音费用 |
-
-TTS 逻辑提取自 `ppt-copilot` 的 `lib/tts.ts` 和 `lib/tts-catalog.ts`。这里可以独立运行，不读取源项目的配置或密钥；模型与接口默认值沿用提取时实现，可通过环境变量调整。
+| [tools/video_engine/](tools/video_engine/) | 通用视频渲染脚本；[接口与示例](docs/video_engine.md) |
+| `tests/` | 文本、语音工具与视频渲染测试，无真实语音费用 |
 
 讲稿默认按顶层 `##` 切分，相邻完整章节合并，每份源稿最多 2000 字符；单章超限时报错，不自动拆段落。可用 `--max-chars`（或 `--max-char`）调整。TTS 适配时每份稿末尾默认加入 `<#0.8#>`，为后续配音拼接留出间隔。
 

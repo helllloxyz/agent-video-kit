@@ -9,7 +9,7 @@
 | 音频 | 原稿按章节拆分 → TTS 朗读适配 → 纯脚本检查和字符串对齐 → MiniMax 配音 → 各段音频与交接文件 | [音频详细流程](docs/audio_workflow.md)、[TTS 转写 Prompt](docs/tts_rewrite_prompt.md)、[接口调用文档](docs/tts.md) |
 | 视频 | 接收原稿、音频和时间轴 → 分镜与画面 → 渲染检查 → 视频交付 | [视频详细流程](docs/video_workflow.md)、[视频 Prompt](docs/video_prompt.md) |
 
-音频模型无需加载视频详细步骤；视频模型复用已有音频时无需加载配音详细步骤。首次使用或检查环境时读取 [README.md](README.md)。`tools/` 提供可执行工具；视频渲染代码需要按实际可用环境编写或复用。
+音频模型无需加载视频详细步骤；视频模型复用已有音频时无需加载配音详细步骤。首次使用或检查环境时读取 [README.md](README.md)。`tools/` 提供可执行工具；视频渲染优先复用 [tools/video_engine/](tools/video_engine/)，再按任务编写分镜。
 
 ## 默认任务路由
 

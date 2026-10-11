@@ -10,10 +10,10 @@
 
 ## 环境与技术
 
-- 推荐 Node.js / JavaScript；检查共享依赖 `.local-deps/video`（`@napi-rs/canvas` 逐帧绘制、`ffmpeg-static` 编码）。缺失时在仓库根执行 `npm install --prefix .local-deps/video`；在任务的 `video/` 目录执行 `ln -sfn ../../../.local-deps/video/node_modules node_modules` 复用，不重复安装。自定义输出目录需调整相对路径。
+- 使用 Node.js 20+ 与 npm；共享依赖位于 `.local-deps/video`（`@napi-rs/canvas`、`ffmpeg-static`），首次在仓库根执行 `npm ci --prefix .local-deps/video`，按锁文件安装当前平台依赖及 FFmpeg。仓库渲染脚本直接加载共享依赖，各任务无需复制引擎或软链 `node_modules`，也不需要全局 FFmpeg。
 - macOS 支持时优先使用 `h264_videotoolbox`，不可用时检测并使用实际可用的 H.264 编码器，如 `libx264`；不假定一定有硬件编码器。
-- 中文字体优先 Hiragino Sans GB，公式优先 STIX；缺失时使用覆盖相应字符的替代字体，并记录选择。
-- 仓库没有内置通用视频渲染引擎，只复用实际存在的代码。新代码放在本次 `video/src/`，保存运行命令及依赖接入方式（软链或 `NODE_PATH`）。环境仍有缺项时报告，不改全局配置。
+- 按名称检测已安装字体，中文优先 Hiragino Sans GB / Noto Sans CJK SC，公式优先 STIX；缺失时安装开放字体 Noto Sans CJK 与 DejaVu 或 STIX，或按 [脚本接口](video_engine.md#绘图与字体) 指定字体文件。字体不随仓库分发，不依赖固定系统路径；记录实际选择并检查字符覆盖。
+- 使用仓库 [渲染脚本](video_engine.md)，将任务分镜放在本次 `video/src/scenes.mjs`，显式传入分镜路径与输出目录。保存任务代码、素材及运行命令，环境缺项时报告，不改全局配置。
 
 ## 视频制作
 
