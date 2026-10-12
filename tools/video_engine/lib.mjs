@@ -21,6 +21,8 @@ export const fontStatus = Object.entries(fontChoices).map(([family, [env, choice
 });
 
 export const W = 1920, H = 1080;
+// About 5% margins; the caption band starts at captionTop, so content should stay above `bottom`.
+export const SAFE = {left: 96, right: W - 96, top: 96, bottom: 940, captionTop: 968};
 
 // Manim's palette, so the frames read as 3Blue1Brown at a glance.
 export const C = {
@@ -40,7 +42,17 @@ export const fontStr = (kind, size) => `${kind === 'it' ? 'italic ' : ''}${size}
 function measure(ch, kind, size) { measureCanvas.font = fontStr(kind, size); return measureCanvas.measureText(ch).width; }
 
 // ---------- a tiny TeX-like layout engine ----------
-// Supports: ^{} _{} \frac{}{} \c{color}{} \t{中文} \op{ln} \m{name}{} \, \; and plain characters.
+// Supports: ^{} _{} \frac{}{} \sqrt{} \overline{} \big…\Bigg \c{color}{} \t{中文} \op{ln} \m{name}{} \, \; and plain characters.
+const SYM = {
+  cdot: '·', times: '×', div: '÷', pm: '±', infty: '∞', to: '→', rightarrow: '→', leftarrow: '←', mapsto: '↦',
+  Rightarrow: '⇒', Leftarrow: '⇐', Leftrightarrow: '⇔', Longrightarrow: '⟹', implies: '⟹', iff: '⟺',
+  neg: '¬', land: '∧', lor: '∨', cap: '∩', cup: '∪', in: '∈', notin: '∉', subset: '⊂', subseteq: '⊆', forall: '∀', exists: '∃',
+  le: '≤', ge: '≥', leq: '≤', geq: '≥', gt: '>', lt: '<', neq: '≠', ne: '≠', approx: '≈', equiv: '≡', propto: '∝', mid: '|', vert: '|',
+  ldots: '…', cdots: '⋯', dots: '…', partial: '∂', sum: '∑', prod: '∏', int: '∫', R: 'ℝ', prime: '′',
+  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', theta: 'θ', lambda: 'λ', mu: 'μ', pi: 'π', sigma: 'σ', tau: 'τ', phi: 'ϕ', omega: 'ω',
+  Delta: 'Δ', Sigma: 'Σ', Omega: 'Ω',
+};
+const BIG = { big: 1.2, Big: 1.45, bigg: 1.7, Bigg: 2 };
 function parse(s) {
   let i = 0;
   const arg = () => {
@@ -70,8 +82,8 @@ function parse(s) {
         }
         if (name === 'quad') { out.push({ type: 'space', w: 1 }); continue; }
         if (name === 'qquad') { out.push({ type: 'space', w: 2 }); continue; }
-        const SYM = { cdot: '·', times: '×', infty: '∞', to: '→', neg: '¬', le: '≤', ge: '≥', leq: '≤', geq: '≥', gt: '>', lt: '<', mid: '|', iff: '⟺', implies: '⟹', R: 'ℝ', phi: 'ϕ', prime: '′' };
         if (SYM[name]) { out.push({ type: 'ch', ch: SYM[name] }); continue; }
+        if (name === 'left' || name === 'right') continue;
         if (name === 'sqrt') { out.push({ type: 'sqrt', items: arg() }); continue; }
         if (name === 'overline') { out.push({ type: 'overline', items: arg() }); continue; }
         if (name === 'frac') { const num = arg(), den = arg(); out.push({ type: 'frac', num, den }); continue; }
@@ -79,7 +91,8 @@ function parse(s) {
         if (name === 'm') { const mark = raw(); out.push({ type: 'mark', mark, items: arg() }); continue; }
         if (name === 't' || name === 'text') { out.push({ type: 'text', str: raw(), kind: 'hei' }); continue; }
         if (name === 'op' || name === 'mathrm') { out.push({ type: 'text', str: raw(), kind: 'up' }); continue; }
-        if (name === 'big') { out.push({ type: 'big', items: arg() }); continue; }
+        if (BIG[name]) { out.push({ type: 'big', scale: BIG[name], items: arg() }); continue; }
+        if (name === 'begin') throw new Error('多行 aligned 公式请用 drawAligned 按行绘制');
         throw new Error(`公式命令不受支持：\\${name}；请显式转换写法或使用其他公式排版工具`);
       }
       i++; out.push({ type: 'ch', ch });
@@ -89,17 +102,17 @@ function parse(s) {
   return group();
 }
 
-const OPS = new Set(['=', '+', '−', '-', '<', '>', '≤', '≥', '⟺', '⇒', '⟹', '→', '×', '≈', '∝', '↦']);
+const OPS = new Set(['=', '+', '−', '-', '<', '>', '≤', '≥', '≠', '≡', '⟺', '⇒', '⇔', '⟹', '→', '←', '×', '÷', '±', '≈', '∝', '↦', '∈', '∉', '⊂', '⊆', '∩', '∪', '∧', '∨']);
 function glyphKind(ch) {
   if (/[A-Za-zα-ωϕ]/.test(ch)) return 'it';
   if (/[\u4e00-\u9fff，。：？！“”、（）]/.test(ch)) return 'hei';
-  if (/[∘∫⁻¹⟺⇒⟹→↦≈∝≤≥−×·…∞¬ℝ√′]/.test(ch)) return 'sym';
+  if (/[∘∫∑∏∂⁻¹⟺⇒⇐⇔⟹→←↦≈≡≠∝≤≥−×÷±·…⋯∞¬∧∨∩∪∈∉⊂⊆∀∃ℝ√′]/.test(ch)) return 'sym';
   return 'up';
 }
 
 function layout(nodes, size, color, marks, inScript = false) {
   const box = { w: 0, asc: size * 0.7, desc: size * 0.22, glyphs: [], rules: [] };
-  let prevCh = null;
+  let prevCh = null, prevKind = null;
   const place = (b, dx, dy) => {
     for (const g of b.glyphs) box.glyphs.push({ ...g, x: g.x + dx, y: g.y + dy });
     for (const r of b.rules) box.rules.push({ ...r, x: r.x + dx, y: r.y + dy });
@@ -113,13 +126,16 @@ function layout(nodes, size, color, marks, inScript = false) {
       // Binary operators get space; a leading/unary minus or anything in a script does not.
       const unary = (ch === '−' || ch === '+') && (prevCh === null || OPS.has(prevCh) || prevCh === '(' || prevCh === ',');
       const pad = OPS.has(ch) && !inScript && !unary ? size * 0.24 : 0;
+      // Italic correction: upright glyphs after a slanted letter would otherwise touch it, e.g. "C)" or "P(".
+      if (prevKind === 'it' && kind !== 'it' && !pad) box.w += size * 0.06;
+      prevKind = kind;
       const w = measure(ch, kind, size);
       box.glyphs.push({ ch, kind, size, color, x: box.w + pad, y: 0 });
       box.w += w + pad * 2 + (ch === ',' && !inScript ? size * 0.18 : 0) + (kind === 'it' ? size * 0.02 : 0);
       prevCh = ch;
       continue;
     }
-    prevCh = 'x';
+    prevCh = 'x'; prevKind = null;
     if (n.type === 'space') { box.w += size * n.w; continue; }
     if (n.type === 'text') {
       const w = measure(n.str, n.kind, size);
@@ -130,10 +146,14 @@ function layout(nodes, size, color, marks, inScript = false) {
     if (n.type === 'group') b = layout(n.items, size, color, marks, inScript);
     else if (n.type === 'overline') {
       b = layout(n.items, size, color, marks, inScript);
-      b.rules.push({x: 0, y: -b.asc - size * 0.12, w: b.w, h: Math.max(2, size * 0.04), color});
-      b.asc += size * 0.16;
+      b.rules.push({x: size * 0.04, y: -b.asc - size * 0.14, w: Math.max(size * 0.3, b.w - size * 0.04), h: Math.max(2, size * 0.04), color});
+      b.asc += size * 0.22;
     }
-    else if (n.type === 'big') b = layout(n.items, size * 1.35, color, marks, inScript);
+    else if (n.type === 'big') {
+      // Scale delimiters about the math axis rather than the baseline.
+      const inner = layout(n.items, size * n.scale, color, marks, inScript), dy = size * 0.25 * (n.scale - 1);
+      b = { w: inner.w, asc: inner.asc - dy, desc: inner.desc + dy, glyphs: inner.glyphs.map((g) => ({ ...g, y: g.y + dy })), rules: inner.rules.map((r) => ({ ...r, y: r.y + dy })) };
+    }
     else if (n.type === 'sqrt') {
       const inner = layout(n.items, size, color, marks, inScript), rs = size * 1.08, rw = measure('√', 'sym', rs);
       const top = inner.asc + size * 0.12, th = Math.max(2, size * 0.05);
@@ -219,6 +239,29 @@ export function mathBounds(src, x, y, o = {}) {
   const marks = {};
   for (const [k, m] of Object.entries(box.marks)) marks[k] = { x: ox + m.x, w: m.w, cx: ox + m.x + m.w / 2, top: y - m.asc, bottom: y + m.desc };
   return { x: ox, w: box.w, top: y - box.asc, bottom: y + box.desc, marks };
+}
+
+// Rows of an aligned block: "\begin{aligned} a &= b \\ &= c \end{aligned}" → [['a', '= b'], ['', '= c']].
+export function alignedRows(src) {
+  return src.replace(/\\(begin|end)\{aligned\}/g, '').split(/\\\\/).map((r) => r.trim()).filter(Boolean)
+    .map((r) => { const k = r.indexOf('&'); return k < 0 ? ['', r] : [r.slice(0, k).trim(), r.slice(k + 1).replace(/&/g, '').trim()]; });
+}
+
+// Multi-line derivation aligned at "&". o.progs / o.alphas give per-row write progress and opacity;
+// o.colors gives per-row colors. Returns each row's bounds for highlighting.
+export function drawAligned(c, src, x, y, o = {}) {
+  const { size = 52, lineHeight = 1.75, align = 'center', progs = [], alphas = [], colors = [], color = C.white } = o;
+  const rows = alignedRows(src);
+  const lefts = rows.map(([l]) => (l ? mathLayout(l, size).w : 0)), rights = rows.map(([, r]) => mathLayout(r, size).w);
+  const maxL = Math.max(...lefts), maxR = Math.max(...rights);
+  const X = align === 'center' ? x + (maxL - maxR) / 2 : align === 'left' ? x + maxL : x - maxR;
+  return rows.map(([l, r], i) => {
+    const ry = y + i * size * lineHeight, ro = { size, color: colors[i] ?? color, prog: progs[i] ?? 1, alpha: alphas[i] ?? 1 };
+    if (l) drawMath(c, l, X, ry, { ...ro, align: 'right' });
+    drawMath(c, r, X, ry, { ...ro, align: 'left' });
+    const top = Math.min(l ? mathBounds(l, X, ry, { size, align: 'right' }).top : Infinity, mathBounds(r, X, ry, { size, align: 'left' }).top);
+    return { x: X - lefts[i], w: lefts[i] + rights[i], top, bottom: ry + size * 0.35, y: ry, anchor: X };
+  });
 }
 
 // Chinese / plain text with the same write effect.

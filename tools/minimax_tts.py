@@ -237,30 +237,47 @@ def srt_time(ms):
     return "%02d:%02d:%02d,%03d" % (hours, minutes, seconds, millis)
 
 
-def build_srt(items):
-    groups, current = [], []
-    for item in items:
-        current.append(item)
-        if len("".join(row["text"] for row in current)) >= 22 or item["endMs"] - current[0]["startMs"] >= 7000:
-            groups.append(current)
-            current = []
-    if current:
-        groups.append(current)
+SPOKEN_TAG_RE = re.compile(r"\([a-z][a-z-]*\)|<#[\d.]+#>", re.I)
+
+
+def split_caption(text, max_chars=28):
+    """Split at sentence, then clause punctuation; never merges separate service sentences."""
+    text = SPOKEN_TAG_RE.sub("", text).strip()
+    pieces = [p for p in re.split(r"(?<=[。！？；!?;])", text) if p.strip()]
+    result = []
+    for piece in pieces:
+        while len(piece) > max_chars:
+            cut = max((piece.rfind(mark, 0, max_chars) for mark in "，、：,:"), default=-1)
+            cut = cut + 1 if cut >= max_chars // 3 else max_chars
+            result.append(piece[:cut])
+            piece = piece[cut:]
+        if piece.strip():
+            result.append(piece)
+    return [p.strip() for p in result if p.strip()]
+
+
+def build_srt(items, max_chars=28):
+    """One or more blocks per service sentence; split times are character-interpolated estimates."""
     blocks, previous_end = [], 0
-    for index, group in enumerate(groups, 1):
-        start = max(group[0]["startMs"], previous_end)
-        end = max(group[-1]["endMs"], start + 100)
-        previous_end = end
-        blocks.append("%s\n%s --> %s\n%s\n" % (
-            index, srt_time(start), srt_time(end), "".join(row["text"] for row in group).strip()))
+    for item in items:
+        pieces = split_caption(item["text"], max_chars)
+        weights = [max(1, len(re.sub(r"\s", "", p))) for p in pieces]
+        start, span, seen = item["startMs"], item["endMs"] - item["startMs"], 0
+        for piece, weight in zip(pieces, weights):
+            begin = max(start + span * seen / sum(weights), previous_end)
+            seen += weight
+            end = max(start + span * seen / sum(weights), begin + 100)
+            previous_end = end
+            blocks.append("%s\n%s --> %s\n%s\n" % (len(blocks) + 1, srt_time(begin), srt_time(end), piece))
     return "\n".join(blocks)
 
 
 def align_paragraphs(text, items):
     def plain(value):
-        value = re.sub(r"\([a-z][a-z-]*\)|<#[\d.]+#>", "", value, flags=re.I)
+        value = SPOKEN_TAG_RE.sub("", value)
         return "".join(c for c in value if not c.isspace() and unicodedata.category(c)[0] not in "PS")
-    paragraphs = [line.strip() for line in text.splitlines() if line.strip()]
+    paragraphs = [SPOKEN_TAG_RE.sub("", line).strip() for line in text.splitlines()]
+    paragraphs = [line for line in paragraphs if line]
     stream = [(item, len(plain(item["text"]))) for item in items]
     total = sum(length for _, length in stream)
     expected = sum(len(plain(line)) for line in paragraphs)

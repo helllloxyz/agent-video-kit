@@ -46,12 +46,13 @@ cp .env.example .env
 | [tools/minimax_tts.py](tools/minimax_tts.py) | MiniMax 请求、音频/字幕保存、时间轴、分镜表及响应恢复，也可作为 Python 模块调用 |
 | [tools/check_tts.py](tools/check_tts.py) | 朗读文本与原稿逐字核对和标签检查 |
 | [tools/split_markdown.py](tools/split_markdown.py) | 按原有章节拆分 Markdown |
+| [tools/audio_handoff.py](tools/audio_handoff.py) | 配音完成后检查各段音频并生成 `manifest.json`、`音频交接.md` |
 | [docs/tts.md](docs/tts.md) | 配音配置、参数、返回协议和函数调用说明 |
 | [.env.example](.env.example) | 用户本地 MiniMax 配置模板 |
 | `outputs/` | 每次任务单独保存文本、音频、视频及过程记录 |
 | `.local-deps/video/` | 共享视频渲染依赖 |
 | `.local-deps/audio/` | 共享音频侧本地工具（如 `imageio_ffmpeg`） |
-| [tools/video_engine/](tools/video_engine/) | 通用视频渲染脚本；[接口与示例](docs/video_engine.md) |
+| [tools/video_engine/](tools/video_engine/) | 视频工具：配音时间轴准备、分镜时间换算、渲染、封面和成片抽检；[接口与示例](docs/video_engine.md) |
 | `tests/` | 文本、语音工具与视频渲染测试，无真实语音费用 |
 
 讲稿默认按顶层 `##` 切分，相邻完整章节合并，每份源稿最多 2000 字符；单章超限时报错，不自动拆段落。可用 `--max-chars`（或 `--max-char`）调整。TTS 适配时每份稿末尾默认加入 `<#0.8#>`，为后续配音拼接留出间隔。

@@ -69,7 +69,20 @@ export function srtTime(sec) {
 export function toSrt(captions) {
   return captions.map((c, i) => `${i + 1}\n${srtTime(c.start)} --> ${srtTime(c.end)}\n${c.text}\n`).join('\n');
 }
+// Consecutive scenes with the same chapter title form one chapter.
+export function chapterSpans(scenes) {
+  const spans = [];
+  for (const s of scenes) {
+    const last = spans[spans.length - 1];
+    if (last && last.title === s.scene.chapter) last.end = s.end;
+    else spans.push({title: s.scene.chapter, start: s.start, end: s.end});
+  }
+  return spans;
+}
 export function chapterMetadata(scenes) {
   const escape = (s) => s.replace(/\\/g, '\\\\').replace(/[=;#]/g, '\\$&').replace(/\r?\n/g, ' ');
-  return ';FFMETADATA1\n' + scenes.map((s) => `[CHAPTER]\nTIMEBASE=1/1000\nSTART=${Math.round(s.start * 1000)}\nEND=${Math.round(s.end * 1000)}\ntitle=${escape(s.scene.chapter)}\n`).join('');
+  return ';FFMETADATA1\n' + chapterSpans(scenes).map((s) => `[CHAPTER]\nTIMEBASE=1/1000\nSTART=${Math.round(s.start * 1000)}\nEND=${Math.round(s.end * 1000)}\ntitle=${escape(s.title)}\n`).join('');
+}
+export function chapterList(scenes) {
+  return chapterSpans(scenes).map((s) => `${srtTime(s.start).slice(s.start >= 3600 ? 0 : 3, 8)} ${s.title}`).join('\n') + '\n';
 }

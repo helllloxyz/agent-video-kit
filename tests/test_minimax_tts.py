@@ -153,10 +153,23 @@ class TtsTests(unittest.TestCase):
         self.assertEqual(tts.normalize_subtitles([{"text": "好", "startMs": 0, "endMs": 40}])[0]["endMs"], 40)
         self.assertEqual(tts.normalize_subtitles([{"text": "坏", "start": "nan", "end": 1}]), [])
 
+    def test_srt_keeps_sentences_separate_and_splits_long_ones(self):
+        long_text = "这是一个很长的句子，" * 6 + "结束。"
+        srt = tts.build_srt([{"text": "标题<#0.8#>", "startMs": 0, "endMs": 1000},
+                             {"text": "一、小标题", "startMs": 1200, "endMs": 2000},
+                             {"text": long_text, "startMs": 2000, "endMs": 14000}])
+        blocks = [block.splitlines() for block in srt.strip().split("\n\n")]
+        self.assertEqual(blocks[0][2], "标题")
+        self.assertEqual(blocks[1][2], "一、小标题")
+        self.assertEqual("".join(block[2] for block in blocks[2:]), long_text)
+        self.assertTrue(all(len(block[2]) <= 28 for block in blocks))
+        self.assertTrue(blocks[-1][1].endswith("00:00:14,000"))
+
     def test_paragraph_alignment_excludes_pause_and_sound_tags(self):
         timeline = tts.align_paragraphs("你好<#0.5#>\n世界(breath)", [
             {"text": "你好世界", "startMs": 0, "endMs": 4000}])
         self.assertEqual([row["endMs"] for row in timeline], [2000, 4000])
+        self.assertEqual([row["text"] for row in timeline], ["你好", "世界"])
         self.assertEqual(tts.align_paragraphs("完全不同的长文", [{"text": "好", "startMs": 0, "endMs": 1000}]), [])
 
     def test_cloned_script_loads_own_env_from_unrelated_cwd(self):
