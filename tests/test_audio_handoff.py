@@ -61,6 +61,26 @@ class AudioHandoffTest(unittest.TestCase):
         self.source.write_text("改过的原稿", encoding="utf-8")
         self.assertNotEqual(self.run_tool("--source", str(self.source)).returncode, 0)
 
+    def test_video_hints_are_handed_off_separately_from_headings(self):
+        text = "## 一、开场 <- 标题淡入 ->\n正文。\n<- 保留对象\n## 非章节\n逐步放大 ->\n更多。\n"
+        self.source.write_text(text, encoding="utf-8")
+        (self.job / "parts/001_一、开场.md").write_text(text, encoding="utf-8")
+        process = self.run_tool("--source", str(self.source))
+        self.assertEqual(process.returncode, 0, process.stderr + process.stdout)
+        row = json.loads((self.job / "manifest.json").read_text(encoding="utf-8"))["parts"][0]
+        self.assertEqual([h["title"] for h in row["headings"]], ["一、开场"])
+        self.assertEqual([h["text"] for h in row["videoHints"]], ["标题淡入", "保留对象\n## 非章节\n逐步放大"])
+        self.assertEqual(row["videoHints"][1]["originalSourceLines"], [3, 5])
+        self.assertIn("不进入配音、字幕", (self.job / "音频交接.md").read_text(encoding="utf-8"))
+
+    def test_old_tts_containing_hints_is_not_marked_complete(self):
+        text = "标题正文<- 放大 ->。<#0.8#>"
+        (self.job / "tts/001_一、开场_TTS.txt").write_text(text, encoding="utf-8")
+        (self.job / "audio/001/request.json").write_text(json.dumps({"text": text}), encoding="utf-8")
+        process = self.run_tool("--source", str(self.source))
+        self.assertEqual(process.returncode, 1)
+        self.assertIn("TTS 稿残留视频制作提示", process.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

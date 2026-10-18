@@ -16,6 +16,11 @@ import re
 import sys
 from pathlib import Path
 
+if __package__:
+    from .video_hints import strip_video_hints, video_hints
+else:
+    from video_hints import strip_video_hints, video_hints
+
 ALLOWED_TAGS = ("breath", "emm", "chuckle")
 TAG_DENSITY_LIMIT = 2  # 每千字
 
@@ -79,7 +84,8 @@ def parse_source(src):
 
         return pattern.sub(repl, text)
 
-    text = src.replace("\r\n", "\n")
+    # 提示是零朗读内容，不能当作允许任意读法的 gap，否则会漏检提示泄漏。
+    text = strip_video_hints(src.replace("\r\n", "\n"), preserve_layout=True)
     text = replace_block(FENCE_RE, "代码", text)
     text = replace_block(HTML_COMMENT_RE, "注释", text)
     text = replace_block(MATH_RE, "公式", text)
@@ -243,6 +249,8 @@ def check_output_format(out):
     stripped = PAUSE_RE.sub("", out)
     if "<#" in stripped or "#>" in stripped:
         errors.append("存在不完整的停顿标记")
+    if "<-" in stripped:
+        errors.append("TTS 中残留视频制作提示 <- ... ->；仅供画面制作，不可朗读")
 
     pieces = PAUSE_RE.split(out)[::2]
     if len(pieces) > 1:
@@ -294,12 +302,30 @@ def md_cell(s):
 def check_pair(src_path, out_path, alignment_path=None):
     src = src_path.read_text(encoding="utf-8")
     out = out_path.read_text(encoding="utf-8")
-    parts, gaps = parse_source(src)
+    try:
+        hints = video_hints(src)
+        parts, gaps = parse_source(src)
+    except ValueError as error:
+        if alignment_path is not None:
+            alignment_path.parent.mkdir(parents=True, exist_ok=True)
+            alignment_path.write_text(json.dumps({"passed": False, "errors": [str(error)], "segments": []},
+                                                 ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return f"## {src_path} → {out_path}\n\n结果：未通过\n\n- {error}", False
     out_norm = normalize_output(out)
 
     alignment = []
     errors = compare(parts, gaps, out_norm, alignment)
-    fmt_errors, warnings = check_output_format(out)
+    # 原稿正文中的集合花括号必须原样保留；只豁免已精确匹配的正文位置，
+    # 公式替换片段内的花括号仍按 LaTeX 残留检查。
+    offsets = output_offsets(out)
+    format_chars = list(out)
+    for span in alignment:
+        if span["kind"] == "literal":
+            start, end = span["ttsNormalizedRange"]
+            for index in offsets[start:end]:
+                if out[index] in "{}":
+                    format_chars[index] = " "
+    fmt_errors, warnings = check_output_format("".join(format_chars))
     errors.extend(fmt_errors)
 
     for g in gaps:
@@ -324,7 +350,7 @@ def check_pair(src_path, out_path, alignment_path=None):
                    "passed": not errors, "errors": errors, "warnings": warnings,
                    "offsetUnit": "Python Unicode code points, zero-based, end-exclusive",
                    "note": "正文按字符串顺序精确匹配；替换片段仍需人工审阅含义。此文件不含音频时间。",
-                   "segments": alignment}
+                   "videoHints": hints, "segments": alignment}
         alignment_path.parent.mkdir(parents=True, exist_ok=True)
         alignment_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -332,6 +358,9 @@ def check_pair(src_path, out_path, alignment_path=None):
     lines.append(f"结果：{'通过' if not errors else f'未通过（{len(errors)} 个错误）'}")
     tags = "，".join(f"{t} {c}" for t, c in tag_counts.items())
     lines.append(f"停顿 {len(PAUSE_RE.findall(out))} 处；语气标签 {tags}；正文 {chars} 字")
+    if hints:
+        destination = "原文与位置已写入 alignment.videoHints" if alignment_path is not None else "使用 --alignment-dir 可导出原文与位置"
+        lines.append(f"视频制作提示 {len(hints)} 处，已从朗读比对中排除；{destination}。")
     if errors:
         lines += ["", "### 错误", ""]
         lines += [f"- {e}" for e in errors]

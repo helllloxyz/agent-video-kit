@@ -1,6 +1,9 @@
 // All public time values use seconds. No scene module is imported implicitly.
 const visibleLength = (s) => [...s.replace(/[\s，。、：；“”"‘’（）()？！…—,.:;?!]/g, '')].length;
 const positive = (v) => Number.isFinite(v) && v > 0;
+function checkVideoHints(text) {
+  if (text.includes('<-')) throw new Error('字幕或章节标题残留视频制作提示 <- ... ->；请先排除提示，再安排字幕与阅读时长');
+}
 
 export function splitCaption(text, maxChars = 30) {
   const result = []; let current = '';
@@ -22,6 +25,7 @@ export function buildTimeline(scenes, options = {}) {
   const out = [], estimated = [];
   for (const s of scenes) {
     if (typeof s.chapter !== 'string' || typeof s.draw !== 'function') throw new Error('每个场景需要 chapter 和 draw(ctx, T)');
+    checkVideoHints(s.chapter);
     if (timed) {
       if (s.start < t || s.end <= s.start) throw new Error('场景时间必须有序、不重叠且 end > start');
       const beats = s.beats ?? [s.start];
@@ -36,6 +40,7 @@ export function buildTimeline(scenes, options = {}) {
     for (const entry of s.lines) {
       const [text, extra = 0] = Array.isArray(entry) ? entry : [entry, 0];
       if (typeof text !== 'string' || !text.trim() || !Number.isFinite(extra) || extra < 0) throw new Error('lines 需要文本或 [文本, 非负额外停留秒数]');
+      checkVideoHints(text);
       const read = Math.max(2.6, visibleLength(text) / speed + 0.6), dur = read + extra;
       beats.push(t);
       const pieces = splitCaption(text), total = pieces.reduce((a, p) => a + Math.max(1, visibleLength(p)), 0);
@@ -56,6 +61,7 @@ export function buildTimeline(scenes, options = {}) {
   let last = 0;
   for (const c of captions) {
     if (!Number.isFinite(c.start) || !Number.isFinite(c.end) || c.start < last || c.end <= c.start || c.end > duration || typeof c.text !== 'string') throw new Error('字幕时间必须有序、不重叠且位于总时长内');
+    checkVideoHints(c.text);
     last = c.end;
   }
   return {scenes: out, captions, duration, timing: timed ? 'explicit' : 'reading_speed_estimate'};

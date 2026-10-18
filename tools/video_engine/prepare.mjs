@@ -26,11 +26,12 @@ function main() {
   const targets = ['audio.flac', 'timeline.json', 'sentences.md'].map((f) => join(out, f));
   if (!v.overwrite && targets.some(existsSync)) throw new Error('输出已存在；使用新目录或 --overwrite');
 
-  const sentences = [], headings = [], warnings = [];
+  const sentences = [], headings = [], warnings = [], videoHints = [];
   let offset = 0;
   const spokenFallback = new Set();
   manifest.parts.forEach((part, index) => {
     const tts = readFileSync(join(job, part.tts), 'utf8');
+    if (tts.includes('<-')) throw new Error(`第 ${index + 1} 段 TTS 稿残留视频制作提示；先检查朗读稿及音频，再准备字幕`);
     const N = normalizeSpoken(tts);
     // Sentence text is cut from the TTS script (service subtitles may drop spaces); times come from the service.
     const clean = cleanSpoken(tts), rawAt = [...clean.matchAll(/\S/gu)].map((m) => m.index);
@@ -38,6 +39,10 @@ function main() {
     const rawSlice = ([a, b]) => clean.slice(rawAt[a], rawAt[b - 1] + clean.slice(rawAt[b - 1]).match(/^\S/u)[0].length);
     const timeline = readJson(join(job, part.timeline));
     const alignment = part.alignment && existsSync(join(job, part.alignment)) ? readJson(join(job, part.alignment)) : null;
+    if (alignment && alignment.passed === false) throw new Error(`第 ${index + 1} 段 alignment 未通过；先重新运行 check_tts.py`);
+    const hints = part.videoHints ?? alignment?.videoHints ?? [];
+    if (hints.length && alignment && !Array.isArray(alignment.videoHints) && v.captions === 'source') throw new Error(`第 ${index + 1} 段 alignment 未记录视频提示；先重新运行 check_tts.py --alignment-dir，避免提示进入字幕`);
+    videoHints.push(...hints.map((hint) => ({...hint, part: index + 1, source: part.part})));
     if (!alignment && v.captions === 'source') warnings.push(`第 ${index + 1} 段缺少 alignment，字幕使用朗读文本`);
     const segments = expandSegments(alignment?.segments ?? []);
     let cursor = 0;
@@ -103,7 +108,7 @@ function main() {
     timing: {sentences: 'minimax_sentence_subtitles_offset_by_decoded_durations', captions: 'sentence_split_by_spoken_characters_estimate'},
     parts: manifest.parts.reduce((a, p, i) => [...a, {index: i + 1, audio: p.audio, offset: i ? a[i - 1].offset + a[i - 1].duration : 0, duration: sec(p.decodedDurationMs)}], []),
     chapters, sections: headings.filter((h) => h.level === 3), title: headings.find((h) => h.level === 1)?.title ?? null,
-    spokenFallbackFormulas: [...spokenFallback], sentences: sentences.map(({units, range, ...s}) => s), captions, warnings,
+    videoHints, spokenFallbackFormulas: [...spokenFallback], sentences: sentences.map(({units, range, ...s}) => s), captions, warnings,
   };
   writeFileSync(targets[1], JSON.stringify(result, null, 2) + '\n');
   const fmt = (t) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${(t % 60).toFixed(2).padStart(5, '0')}`;
@@ -111,6 +116,11 @@ function main() {
   for (const [ci, c] of chapters.entries()) {
     md.push(`## ${ci}. ${c.title}（${fmt(c.start)}–${fmt(c.end)}）`, '', '| id | 开始 | 结束 | 原稿文本 |', '| ---: | ---: | ---: | --- |');
     for (const s of sentences.filter((x) => x.chapter === ci)) md.push(`| ${s.id} | ${fmt(s.start)} | ${fmt(s.end)} | ${s.text.replace(/\|/g, '\\|')} |`);
+    md.push('');
+  }
+  if (videoHints.length) {
+    md.push('## 视频制作提示（不朗读、不作为字幕，无独立时间）', '');
+    for (const hint of videoHints) md.push(`- 第 ${hint.part} 段，拆分稿第 ${hint.sourceLines.join('–')} 行：${hint.text.replace(/\s+/g, ' ')}`);
     md.push('');
   }
   writeFileSync(targets[2], md.join('\n'));

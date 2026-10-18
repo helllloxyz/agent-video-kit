@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync} from 'node:fs';
+import {mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -34,6 +34,14 @@ test('explicit timing retains provided timestamps and rejects overlap or mixed m
   assert.throws(() => buildTimeline([scenes[0], {...scenes[1], start: 0.5}]));
   assert.throws(() => buildTimeline(scenes, {captions: [{start: 0, end: 3, text: '越界'}]}));
   assert.throws(() => buildTimeline([{...scenes[0], beats: [NaN]}]));
+});
+
+test('raw video hints cannot leak through silent lines, explicit captions or chapter labels', () => {
+  assert.throws(() => buildTimeline([{chapter: '一', lines: ['正文<- 放大 ->'], draw}]), /残留视频制作提示/);
+  const scene = {chapter: '一', start: 0, end: 1, draw};
+  assert.throws(() => buildTimeline([scene], {captions: [{start: 0, end: 1, text: '正文<- 放大 ->'}]}), /残留视频制作提示/);
+  assert.throws(() => buildTimeline([{...scene, chapter: '一<- 淡入 ->'}]), /残留视频制作提示/);
+  assert.equal(buildTimeline([{chapter: '一', lines: ['普通 <说明> 和 0 < x < 1'], draw}]).captions[0].text, '普通 <说明> 和 0 < x < 1');
 });
 
 test('FFmetadata escapes chapter metacharacters', () => {
@@ -136,6 +144,48 @@ test('direct CLI works from another cwd; stills, sheet, full, no overwrite, enco
 import {createRequire} from 'node:module';
 function sharedFfmpeg() { return createRequire(resolve(root, '.local-deps/video/package.json'))('ffmpeg-static'); }
 
+test('video hints survive text/audio handoff but never enter prepared captions or chapters', {skip: !ready}, () => {
+  const temp = mkdtempSync(join(tmpdir(), 'video-hints-'));
+  try {
+    const runPython = (script, args) => spawnSync('python3', [join(root, 'tools', script), ...args],
+      {encoding: 'utf8', env: {...process.env, FFMPEG: sharedFfmpeg()}, timeout: 30000});
+    for (const dir of ['parts', 'tts', 'alignment', 'audio/001']) mkdirSync(join(temp, dir), {recursive: true});
+    const source = join(temp, 'source.md'), part = join(temp, 'parts/001.md');
+    const tts = join(temp, 'tts/001_TTS.txt'), alignment = join(temp, 'alignment/001.alignment.json');
+    const manuscript = '## 第一章 <- 标题淡入 ->\n正文 $x^2$<- 放大曲线 ->。\n';
+    const spoken = '第一章\n正文 x 的平方。<#0.8#>';
+    writeFileSync(source, manuscript); writeFileSync(part, manuscript); writeFileSync(tts, spoken);
+    const checked = runPython('check_tts.py', [part, tts, '--alignment-dir', join(temp, 'alignment')]);
+    assert.equal(checked.status, 0, checked.stderr + checked.stdout);
+    const audio = join(temp, 'audio/001');
+    const generated = spawnSync(sharedFfmpeg(), ['-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=32000', '-t', '2', join(audio, 'speech.mp3')]);
+    assert.equal(generated.status, 0, generated.stderr?.toString());
+    writeFileSync(join(audio, 'request.json'), JSON.stringify({text: spoken}));
+    writeFileSync(join(audio, 'result.json'), JSON.stringify({ok: true, voiceId: 'local-test', warnings: []}));
+    writeFileSync(join(audio, 'timeline.json'), JSON.stringify({subtitles: [
+      {text: '第一章', startMs: 0, endMs: 400}, {text: '正文x的平方。', startMs: 500, endMs: 1800},
+    ]}));
+    const handoff = runPython('audio_handoff.py', [temp, '--source', source]);
+    assert.equal(handoff.status, 0, handoff.stderr + handoff.stdout);
+    const prepare = (out) => spawnSync(process.execPath, [join(root, 'tools/video_engine/prepare.mjs'), '--job', temp, '--output-dir', out], {encoding: 'utf8', timeout: 30000});
+    const out = join(temp, 'video/prepared'), prepared = prepare(out);
+    assert.equal(prepared.status, 0, prepared.stderr);
+    const timeline = JSON.parse(readFileSync(join(out, 'timeline.json'), 'utf8'));
+    assert.deepEqual(timeline.videoHints.map((h) => h.text), ['标题淡入', '放大曲线']);
+    assert.equal(timeline.videoHints[1].source, 'parts/001.md');
+    assert.equal(timeline.videoHints[1].part, 1);
+    assert.equal(timeline.chapters[0].title, '第一章');
+    assert.match(timeline.sentences[1].text, /x²/);
+    assert.doesNotMatch(JSON.stringify([...timeline.sentences, ...timeline.captions, ...timeline.chapters]), /放大曲线|标题淡入|<-|->/);
+    assert.doesNotMatch(toSrt(timeline.captions), /放大曲线|标题淡入|<-/);
+    assert.match(readFileSync(join(out, 'sentences.md'), 'utf8'), /视频制作提示/);
+    assert.equal(readFileSync(source, 'utf8'), manuscript);
+    const stale = JSON.parse(readFileSync(alignment, 'utf8')); delete stale.videoHints;
+    writeFileSync(alignment, JSON.stringify(stale));
+    assert.match(prepare(join(temp, 'stale')).stderr, /alignment 未记录视频提示/);
+  } finally { rmSync(temp, {recursive: true, force: true}); }
+});
+
 test('math commands cannot silently disappear', {skip: !ready}, async () => {
   const {mathLayout} = await import('../tools/video_engine/lib.mjs');
   assert.throws(() => mathLayout(String.raw`\unknown{A}`, 40), /不受支持/);
@@ -145,6 +195,13 @@ test('math commands cannot silently disappear', {skip: !ready}, async () => {
   assert.ok(box.glyphs.some((g) => g.ch === '|'));
   assert.ok(mathLayout(String.raw`x_2 > x_1 \;\Longrightarrow\; F\Big[F\big(x, y\big), z\Big]`, 40).glyphs.some((g) => g.ch === '⟹'));
   assert.throws(() => mathLayout(String.raw`\begin{aligned}a&=b\end{aligned}`, 40), /drawAligned/);
+});
+
+test('colored italic letters keep the italic correction before upright glyphs', {skip: !ready}, async () => {
+  const {mathLayout} = await import('../tools/video_engine/lib.mjs');
+  const paren = (src) => mathLayout(src, 40).glyphs.find((g) => g.ch === '(').x;
+  assert.equal(paren(String.raw`\c{gold}{f}(x)`), paren('f(x)'));
+  assert.ok(paren('f(x)') >= mathLayout('f', 40).w + 40 * 0.12, 'the overhanging italic f gets extra room');
 });
 
 test('aligned rows split on line breaks and the first ampersand', {skip: !ready}, async () => {

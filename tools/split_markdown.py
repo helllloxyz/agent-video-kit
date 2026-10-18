@@ -6,6 +6,11 @@ from pathlib import Path
 import re
 import sys
 
+if __package__:
+    from .video_hints import strip_video_hints
+else:
+    from video_hints import strip_video_hints
+
 
 HEADING = re.compile(r"^ {0,3}##(?:[ \t]+(.*)|[ \t]*)$")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\r\n]*)$")
@@ -13,7 +18,7 @@ FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\r\n]*)$")
 
 def split_sections(text):
     """保留原文与换行；导语归第一节，忽略围栏代码和 YAML front matter。"""
-    lines = text.splitlines(keepends=True)
+    lines = strip_video_hints(text, preserve_layout=True).splitlines(keepends=True)
     headings = []
     fence = None
     in_frontmatter = False

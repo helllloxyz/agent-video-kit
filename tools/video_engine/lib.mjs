@@ -127,7 +127,7 @@ function layout(nodes, size, color, marks, inScript = false) {
       const unary = (ch === '−' || ch === '+') && (prevCh === null || OPS.has(prevCh) || prevCh === '(' || prevCh === ',');
       const pad = OPS.has(ch) && !inScript && !unary ? size * 0.24 : 0;
       // Italic correction: upright glyphs after a slanted letter would otherwise touch it, e.g. "C)" or "P(".
-      if (prevKind === 'it' && kind !== 'it' && !pad) box.w += size * 0.06;
+      if (prevKind === 'it' && kind !== 'it' && !pad) box.w += size * (prevCh === 'f' ? 0.14 : 0.06);
       prevKind = kind;
       const w = measure(ch, kind, size);
       box.glyphs.push({ ch, kind, size, color, x: box.w + pad, y: 0 });
@@ -180,6 +180,8 @@ function layout(nodes, size, color, marks, inScript = false) {
       b.rules.push({ x: size * 0.06, y: axis, w, h: Math.max(2, size * 0.045), color });
     }
     if (b) { place(b, box.w, 0); box.w += b.w; box.asc = Math.max(box.asc, b.asc); box.desc = Math.max(box.desc, b.desc); }
+    // A colored or grouped letter keeps the italic correction for what follows, e.g. "\c{gold}{f}(".
+    if (b && ['color', 'group', 'mark'].includes(n.type) && b.glyphs.length) ({kind: prevKind, ch: prevCh} = b.glyphs[b.glyphs.length - 1]);
   }
   return box;
 }

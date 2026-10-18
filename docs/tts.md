@@ -21,6 +21,8 @@
 
 以下从克隆后的根目录执行。输入为已经准备好的 UTF-8 纯文本；正文、换行、停顿及语气标签原样保留，不自动改写 Markdown 或公式。上限沿用源项目的 9000 个 UTF-16 字符，超长先分段。
 
+输入必须先按 [视频制作提示约定](video_hints.md) 排除 `<- ... ->` 提示，原稿与交接记录保留。脚本在任何联网请求前拒绝仍含 `<-` 的文本，不自动删除提示后提交付费合成；`<#0.8#>` 停顿标记不受影响。
+
 ```bash
 python3 tools/minimax_tts.py voices
 python3 tools/minimax_tts.py synthesize --text-file outputs/讲稿_TTS.txt

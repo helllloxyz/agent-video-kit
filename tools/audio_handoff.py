@@ -20,6 +20,11 @@ import shutil
 import subprocess
 import sys
 
+if __package__:
+    from .video_hints import strip_video_hints, video_hints
+else:
+    from video_hints import strip_video_hints, video_hints
+
 ROOT = Path(__file__).resolve().parents[1]
 RATE = 32000
 SILENCE_DBFS = -45
@@ -60,9 +65,12 @@ def trailing_silence_ms(samples):
 
 def headings(markdown, first_line):
     out = []
+    markdown = strip_video_hints(markdown, preserve_layout=True)
     for match in HEADING_RE.finditer(markdown):
         line = markdown.count("\n", 0, match.start()) + first_line
-        out.append({"level": len(match[1]), "title": match[2].strip(), "originalSourceLine": line})
+        title = match[2].strip()
+        if title:
+            out.append({"level": len(match[1]), "title": title, "originalSourceLine": line})
     return out
 
 
@@ -72,7 +80,9 @@ def check_part(ffmpeg, job, index, part, source_offset, source_line):
     markdown = part.read_text(encoding="utf-8")
     row = {"part": part.relative_to(job).as_posix(), "tts": tts.relative_to(job).as_posix(),
            "alignment": alignment.relative_to(job).as_posix(), "audioDir": audio.relative_to(job).as_posix(),
-           "sourceCharacters": len(markdown), "headings": headings(markdown, source_line)}
+           "sourceCharacters": len(markdown), "headings": headings(markdown, source_line),
+           "videoHints": [{**hint, "originalSourceLines": [n + source_line - 1 for n in hint["sourceLines"]]}
+                          for hint in video_hints(markdown)]}
     if source_offset is not None:
         row.update(originalSourceRange=[source_offset, source_offset + len(markdown)], originalSourceFirstLine=source_line)
     errors, warnings = [], []
@@ -87,6 +97,8 @@ def check_part(ffmpeg, job, index, part, source_offset, source_line):
     result = json.loads((audio / "result.json").read_text(encoding="utf-8"))
     request = json.loads((audio / "request.json").read_text(encoding="utf-8"))
     text = tts.read_text(encoding="utf-8") if tts.is_file() else ""
+    if "<-" in text:
+        errors.append("TTS 稿残留视频制作提示 <- ... ->，不能作为已完成音频交接")
     if not result.get("ok"):
         errors.append("result.json 不是成功状态")
     if request.get("text") != text:
@@ -161,6 +173,7 @@ def main():
              "- alignment/ 由 check_tts.py 纯脚本生成，只记录原稿与朗读稿的字符对应，不含音频时间。",
              "- 各段 timeline.json 的 subtitles 来自 MiniMax，从零开始；paragraphs 按字符插值，属于估算。",
              "- 连续视频由视频流程按 decodedDurationMs 累加偏移；画面和公式以原稿为准。", "",
+             "- 各段 videoHints 保留 <- ... -> 视频制作提示及源行号，只用于分镜和动画，不进入配音、字幕或章节标题，也不自带时长。", "",
              "| 段 | 章节 | 音频 | 实际时长（秒） | 字幕句数 |", "| --- | --- | --- | ---: | ---: |"]
     for index, (row, check) in enumerate(zip(rows, checks), 1):
         duration = "%.3f" % (row["decodedDurationMs"] / 1000) if "decodedDurationMs" in row else "—"
