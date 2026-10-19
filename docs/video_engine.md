@@ -30,6 +30,8 @@ node tools/video_engine/prepare.mjs --job outputs/本次任务
 
 句子时间来自 MiniMax 同次字幕，多段按实际时长累加偏移。字幕默认 `--captions source`：用 alignment 把读法还原为原稿公式（如“A 竖线 C”显示为 `A|C`），过长公式（默认显示宽度超过 30）回退为朗读文字并在 `spokenFallbackFormulas` 中列出；`--captions spoken` 直接用朗读文字。`--caption-width 24` 控制每条字幕的显示宽度（ASCII 计 0.55），切分优先在标点处，长句均分，不在英文单词中间断开。
 
+上述为工具默认值；视频简读流程显式传入 `--captions spoken`，字幕跟随简短口播，完整公式由分镜绘制在主画面。公式读法为空时没有可映射的朗读字符，工具不会自动生成它的字幕、展示时长或镜头；须依据 `videoHints` 和相邻解释句安排。`spokenFallbackFormulas` 也不能作为所有省读公式的清单，仍需阅读原稿与 `改动说明.md`。
+
 ## 分镜接口
 
 每个 `scenes.mjs` 导出非空数组 `scenes`。有配音时用 `story.mjs` 按句子编号写分镜：
