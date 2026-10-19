@@ -107,8 +107,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="输入 Markdown 文件路径（UTF-8）")
     parser.add_argument("-o", "--output-dir", type=Path, help="输出目录，默认：原文件名_split")
-    parser.add_argument("--max-chars", "--max-char", type=int, default=2000,
-                        help="每份最大字符数（默认 2000）；含标点、空格和换行；只按 ## 切分，单章超限时报错")
+    parser.add_argument("--max-chars", "--max-char", type=int, default=3000,
+                        help="每份最大字符数（默认 3000）；含标点、空格和换行；只按 ## 切分，单章超限时报错")
     parser.add_argument("--dry-run", action="store_true", help="只预览拆分结果，不写文件")
     args = parser.parse_args()
     if args.max_chars is not None and args.max_chars <= 0:

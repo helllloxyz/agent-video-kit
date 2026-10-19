@@ -1,4 +1,5 @@
 import {existsSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
 import {createCanvas, GlobalFonts} from './runtime.mjs';
 
 const mathFonts = ['STIX Two Text', 'STIXGeneral', 'Cambria Math', 'DejaVu Serif', 'Noto Serif', 'Times New Roman'];
@@ -7,6 +8,7 @@ const fontChoices = {
   MathIt: ['VIDEO_FONT_MATH_ITALIC', mathFonts, 'serif'],
   MathSym: ['VIDEO_FONT_SYMBOL', ['STIX Two Math', 'STIXGeneral', ...mathFonts], 'serif'],
   Hei: ['VIDEO_FONT_CJK', ['Hiragino Sans GB', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', 'Microsoft YaHei', 'WenQuanYi Zen Hei', 'PingFang SC', 'SimHei', 'Arial Unicode MS'], 'sans-serif'],
+  Song: ['VIDEO_FONT_CJK_SERIF', ['Songti SC', 'Noto Serif CJK SC', 'Noto Serif SC', 'Source Han Serif SC', 'STSong', 'SimSun'], 'serif'],
 };
 export const fontStatus = Object.entries(fontChoices).map(([family, [env, choices, fallback]]) => {
   const path = process.env[env];
@@ -20,15 +22,45 @@ export const fontStatus = Object.entries(fontChoices).map(([family, [env, choice
   return {family, selected: registered ? selected : fallback, source: registered ? 'system' : 'fallback', registered: Boolean(registered)};
 });
 
+// Register font files for one engine family ('Song', 'Hei', 'MathUp', …), e.g. separate Regular and Bold faces,
+// since system .ttc collections only expose their first face. Missing files throw instead of silently falling back.
+export function registerFont(familyName, ...paths) {
+  const status = fontStatus.find((s) => s.family === familyName);
+  if (!status) throw new Error(`未知字体族：${familyName}`);
+  for (const path of paths) {
+    if (!existsSync(path) || !GlobalFonts.registerFromPath(path, familyName)) throw new Error(`无法注册字体文件：${path}`);
+  }
+  Object.assign(status, {selected: paths.map((p) => p.split('/').pop()).join(' + '), source: 'file', registered: true});
+  if (familyName === 'Song') checkSong();
+}
+
+// Regular/Bold serif faces split out of a system .ttc by tools/video_engine/setup_fonts.py.
+export const LOCAL_FONT_DIR = fileURLToPath(new URL('../../.local-deps/fonts/', import.meta.url));
+const songStatus = fontStatus.find((s) => s.family === 'Song');
+function checkSong() {
+  const weights = (name) => GlobalFonts.families.find((f) => f.family === name)?.styles.map((s) => s.weight) ?? [];
+  const all = [...weights('Song'), ...(songStatus.source === 'system' ? weights(songStatus.selected) : [])];
+  songStatus.usable = all.some((w) => w <= 500);
+  if (songStatus.usable) delete songStatus.note;
+  else songStatus.note = '缺少宋体 Regular 字面，正文回退黑体；运行 python3 tools/video_engine/setup_fonts.py';
+}
+{
+  const local = ['Regular', 'Bold'].map((w) => `${LOCAL_FONT_DIR}CJKSerif-${w}.ttf`).filter(existsSync);
+  const bold = process.env.VIDEO_FONT_CJK_SERIF_BOLD;
+  if (bold) registerFont('Song', bold);
+  else if (!process.env.VIDEO_FONT_CJK_SERIF && local.length) registerFont('Song', ...local);
+  checkSong();
+}
+
 export const W = 1920, H = 1080;
 // About 5% margins; the caption band starts at captionTop, so content should stay above `bottom`.
 export const SAFE = {left: 96, right: W - 96, top: 96, bottom: 940, captionTop: 968};
 
-// Manim's palette, so the frames read as 3Blue1Brown at a glance.
+// Warm dark paper with ivory text and a clay accent (Claude-like); semantic hues are softened Manim colors.
 export const C = {
-  bg: '#0c0c0e', white: '#ffffff', grey: '#888888', dim: '#4a4a4f', faint: '#26262b',
-  blue: '#58C4DD', teal: '#5CD0B3', green: '#83C167', yellow: '#F7D96F', gold: '#F0AC5F',
-  red: '#FC6255', maroon: '#C55F73', purple: '#9A72AC', pink: '#D147BD',
+  bg: '#1d1c1a', panel: '#292825', panel2: '#302e2b', white: '#f6f2ea', grey: '#a8a399', dim: '#625e57', faint: '#34322e',
+  blue: '#6fa3d6', teal: '#79bfa3', green: '#93b874', yellow: '#e9c46a', gold: '#df8e5c', clay: '#d97757',
+  red: '#e2574c', maroon: '#b86a78', purple: '#a08ccd', pink: '#d0719f',
 };
 
 export const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
@@ -37,14 +69,29 @@ export const lerp = (a, b, t) => a + (b - a) * t;
 export const ramp = (t, start, dur = 1) => smooth((t - start) / dur);
 
 const measureCanvas = createCanvas(10, 10).getContext('2d');
-const FONT = { up: 'MathUp', it: 'MathIt', sym: 'MathSym', hei: 'Hei' };
-export const fontStr = (kind, size) => `${kind === 'it' ? 'italic ' : ''}${size}px "${FONT[kind] || FONT.hei}", "STIX Two Text", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif`;
+// Default look: Songti body text (kind 'hei' and \t{}), sans captions, upright math letters. Scene modules may
+// call setStyle() once at import time; 'sans' and 'song' as a drawText kind always mean Hei and Song.
+export const STYLE = { text: 'song', caption: 'sans', mathItalic: false };
+export function setStyle(o = {}) {
+  for (const k of ['text', 'caption']) if (o[k] !== undefined && !['sans', 'song'].includes(o[k])) throw new Error(`未知字体风格：${o[k]}`);
+  Object.assign(STYLE, o);
+  layoutCache.clear();
+}
+// Song is only used when a Regular-weight face exists; system .ttc collections often expose just their Black face.
+const songUsable = () => songStatus.usable;
+const FONT = { up: 'MathUp', it: 'MathIt', sym: 'MathSym', sans: 'Hei', song: 'Song' };
+const family = (kind) => {
+  const k = FONT[kind] ? kind : kind === 'hei' || !kind ? STYLE.text : 'sans';
+  return k === 'song' && !songUsable() ? FONT.sans : FONT[k];
+};
+const slanted = (kind) => kind === 'it' && STYLE.mathItalic;
+export const fontStr = (kind, size, weight = '') => `${slanted(kind) ? 'italic ' : ''}${weight ? weight + ' ' : ''}${size}px "${family(kind)}", "STIX Two Text", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif`;
 function measure(ch, kind, size) { measureCanvas.font = fontStr(kind, size); return measureCanvas.measureText(ch).width; }
 
 // ---------- a tiny TeX-like layout engine ----------
 // Supports: ^{} _{} \frac{}{} \sqrt{} \overline{} \big…\Bigg \c{color}{} \t{中文} \op{ln} \m{name}{} \, \; and plain characters.
 const SYM = {
-  cdot: '·', times: '×', div: '÷', pm: '±', infty: '∞', to: '→', rightarrow: '→', leftarrow: '←', mapsto: '↦',
+  cdot: '·', times: '×', div: '÷', pm: '±', ast: '∗', circ: '∘', infty: '∞', to: '→', rightarrow: '→', leftarrow: '←', mapsto: '↦', longrightarrow: '⟶',
   Rightarrow: '⇒', Leftarrow: '⇐', Leftrightarrow: '⇔', Longrightarrow: '⟹', implies: '⟹', iff: '⟺',
   neg: '¬', land: '∧', lor: '∨', cap: '∩', cup: '∪', in: '∈', notin: '∉', subset: '⊂', subseteq: '⊆', forall: '∀', exists: '∃',
   le: '≤', ge: '≥', leq: '≤', geq: '≥', gt: '>', lt: '<', neq: '≠', ne: '≠', approx: '≈', equiv: '≡', propto: '∝', mid: '|', vert: '|',
@@ -76,7 +123,7 @@ function parse(s) {
         i++; let name = ''; while (i < s.length && /[a-zA-Z]/.test(s[i])) name += s[i++];
         if (!name) {
           const sym = s[i++];
-          if (sym === '{' || sym === '}') out.push({ type: 'ch', ch: sym });
+          if ('{}%&#$_'.includes(sym)) out.push({ type: 'ch', ch: sym });
           else out.push({ type: 'space', w: sym === ',' ? 0.17 : sym === ';' ? 0.4 : 0.28 });
           continue;
         }
@@ -102,11 +149,11 @@ function parse(s) {
   return group();
 }
 
-const OPS = new Set(['=', '+', '−', '-', '<', '>', '≤', '≥', '≠', '≡', '⟺', '⇒', '⇔', '⟹', '→', '←', '×', '÷', '±', '≈', '∝', '↦', '∈', '∉', '⊂', '⊆', '∩', '∪', '∧', '∨']);
+const OPS = new Set(['=', '+', '−', '-', '<', '>', '≤', '≥', '≠', '≡', '⟺', '⇒', '⇔', '⟹', '→', '⟶', '←', '×', '÷', '±', '∗', '∘', '≈', '∝', '↦', '∈', '∉', '⊂', '⊆', '∩', '∪', '∧', '∨']);
 function glyphKind(ch) {
   if (/[A-Za-zα-ωϕ]/.test(ch)) return 'it';
   if (/[\u4e00-\u9fff，。：？！“”、（）]/.test(ch)) return 'hei';
-  if (/[∘∫∑∏∂⁻¹⟺⇒⇐⇔⟹→←↦≈≡≠∝≤≥−×÷±·…⋯∞¬∧∨∩∪∈∉⊂⊆∀∃ℝ√′]/.test(ch)) return 'sym';
+  if (/[∘∗∫∑∏∂⁻¹⟺⇒⇐⇔⟹→⟶←↦≈≡≠∝≤≥−×÷±·…⋯∞¬∧∨∩∪∈∉⊂⊆∀∃ℝ√′]/.test(ch)) return 'sym';
   return 'up';
 }
 
@@ -127,11 +174,11 @@ function layout(nodes, size, color, marks, inScript = false) {
       const unary = (ch === '−' || ch === '+') && (prevCh === null || OPS.has(prevCh) || prevCh === '(' || prevCh === ',');
       const pad = OPS.has(ch) && !inScript && !unary ? size * 0.24 : 0;
       // Italic correction: upright glyphs after a slanted letter would otherwise touch it, e.g. "C)" or "P(".
-      if (prevKind === 'it' && kind !== 'it' && !pad) box.w += size * (prevCh === 'f' ? 0.14 : 0.06);
+      if (slanted(prevKind) && kind !== 'it' && !pad) box.w += size * (prevCh === 'f' ? 0.14 : 0.06);
       prevKind = kind;
       const w = measure(ch, kind, size);
       box.glyphs.push({ ch, kind, size, color, x: box.w + pad, y: 0 });
-      box.w += w + pad * 2 + (ch === ',' && !inScript ? size * 0.18 : 0) + (kind === 'it' ? size * 0.02 : 0);
+      box.w += w + pad * 2 + (ch === ',' && !inScript ? size * 0.18 : 0) + (slanted(kind) ? size * 0.02 : 0);
       prevCh = ch;
       continue;
     }
@@ -167,7 +214,9 @@ function layout(nodes, size, color, marks, inScript = false) {
       const base = layout([n.base], size, color, marks, inScript);
       b = { w: base.w, asc: base.asc, desc: base.desc, glyphs: [...base.glyphs], rules: [...base.rules] };
       let extra = 0;
-      if (n.sup) { const s = layout(n.sup, size * 0.66, color, {}, true); for (const g of s.glyphs) b.glyphs.push({ ...g, x: g.x + base.w + size * 0.03, y: g.y - size * 0.42 }); for (const r of s.rules) b.rules.push({ ...r, x: r.x + base.w, y: r.y - size * 0.42 }); extra = Math.max(extra, s.w); b.asc = Math.max(b.asc, size * 0.42 + s.asc); }
+      const last = base.glyphs[base.glyphs.length - 1];
+      const ic = last && slanted(last.kind) ? size * (last.ch === 'f' ? 0.1 : 0.04) : 0;
+      if (n.sup) { const s = layout(n.sup, size * 0.66, color, {}, true); for (const g of s.glyphs) b.glyphs.push({ ...g, x: g.x + base.w + ic + size * 0.03, y: g.y - size * 0.42 }); for (const r of s.rules) b.rules.push({ ...r, x: r.x + base.w + ic, y: r.y - size * 0.42 }); extra = Math.max(extra, s.w + ic); b.asc = Math.max(b.asc, size * 0.42 + s.asc); }
       if (n.sub) { const s = layout(n.sub, size * 0.66, color, {}, true); for (const g of s.glyphs) b.glyphs.push({ ...g, x: g.x + base.w + size * 0.02, y: g.y + size * 0.24 }); for (const r of s.rules) b.rules.push({ ...r, x: r.x + base.w, y: r.y + size * 0.24 }); extra = Math.max(extra, s.w); b.desc = Math.max(b.desc, size * 0.24 + s.desc); }
       b.w += extra + size * 0.05;
     } else if (n.type === 'frac') {
@@ -207,7 +256,7 @@ export function mathLayout(src, size, color = C.white) {
 // Per-glyph "Write": outline sweeps in, then the fill takes over, like Manim's Write.
 function drawGlyph(c, g, x, y, q, alpha) {
   if (q <= 0) return;
-  c.font = fontStr(g.kind, g.size);
+  c.font = fontStr(g.kind, g.size, g.weight);
   const outline = q < 1 ? Math.min(1, q * 2.5) * (1 - smooth((q - 0.45) / 0.55)) : 0;
   const fill = smooth((q - 0.3) / 0.7);
   if (outline > 0.01) { c.globalAlpha = alpha * outline; c.strokeStyle = g.color; c.lineWidth = Math.max(1, g.size / 34); c.strokeText(g.ch, x, y); }
@@ -268,18 +317,18 @@ export function drawAligned(c, src, x, y, o = {}) {
 
 // Chinese / plain text with the same write effect.
 export function drawText(c, str, x, y, o = {}) {
-  const { size = 40, color = C.white, align = 'center', prog = 1, alpha = 1, kind = 'hei' } = o;
+  const { size = 40, color = C.white, align = 'center', prog = 1, alpha = 1, kind = 'hei', weight = '' } = o;
   if (alpha <= 0.002 || prog <= 0) return;
-  c.save(); c.font = fontStr(kind, size); c.textBaseline = 'middle'; c.textAlign = 'left';
+  c.save(); c.font = fontStr(kind, size, weight); c.textBaseline = 'middle'; c.textAlign = 'left';
   const chars = [...str]; const w = c.measureText(str).width;
   let ox = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
   if (prog >= 1) { c.globalAlpha = alpha; c.fillStyle = color; c.fillText(str, ox, y); c.restore(); return w; }
   let acc = '';
-  chars.forEach((ch, i) => { const gx = ox + c.measureText(acc).width; acc += ch; drawGlyph(c, { ch, kind, size, color }, gx, y, writeQ(prog, i, chars.length), alpha); });
+  chars.forEach((ch, i) => { const gx = ox + c.measureText(acc).width; acc += ch; drawGlyph(c, { ch, kind, size, color, weight }, gx, y, writeQ(prog, i, chars.length), alpha); });
   c.restore(); return w;
 }
 
-export function textWidth(str, size, kind = 'hei') { measureCanvas.font = fontStr(kind, size); return measureCanvas.measureText(str).width; }
+export function textWidth(str, size, kind = 'hei', weight = '') { measureCanvas.font = fontStr(kind, size, weight); return measureCanvas.measureText(str).width; }
 
 // ---------- primitives ----------
 export function line(c, x1, y1, x2, y2, o = {}) {

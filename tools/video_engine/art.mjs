@@ -17,7 +17,7 @@ export function rng(seed) {
   };
 }
 
-export function card(c, cx, top, w, h, alpha, color = C.grey, fill = '#141418') {
+export function card(c, cx, top, w, h, alpha, color = C.grey, fill = C.panel) {
   rect(c, cx - w / 2, top, w, h, { stroke: color, width: 2.5, alpha: alpha * 0.9, r: 14, fill });
 }
 
@@ -73,7 +73,7 @@ export function die(c, x, y, s, n, rot, alpha, color = C.white) {
   if (alpha <= 0) return;
   c.save(); c.globalAlpha = alpha; c.translate(x, y); c.rotate(rot);
   c.beginPath(); c.roundRect(-s / 2, -s / 2, s, s, s * 0.16);
-  c.fillStyle = '#1c1c22'; c.fill(); c.strokeStyle = color; c.lineWidth = Math.max(2, s / 30); c.stroke();
+  c.fillStyle = C.panel; c.fill(); c.strokeStyle = color; c.lineWidth = Math.max(2, s / 30); c.stroke();
   c.fillStyle = color;
   for (const [px, py] of PIPS[n]) { c.beginPath(); c.arc(px * s * 0.27, py * s * 0.27, s * 0.085, 0, Math.PI * 2); c.fill(); }
   c.restore();
@@ -93,7 +93,7 @@ export function cup(c, x, y, s, alpha) {
   if (alpha <= 0) return;
   c.save(); c.globalAlpha = alpha;
   c.beginPath(); c.moveTo(x - s * 0.62, y); c.lineTo(x - s * 0.42, y - s * 1.0); c.lineTo(x + s * 0.42, y - s * 1.0); c.lineTo(x + s * 0.62, y); c.closePath();
-  c.fillStyle = '#2a2a33'; c.fill(); c.strokeStyle = C.grey; c.lineWidth = 3; c.stroke();
+  c.fillStyle = C.panel2; c.fill(); c.strokeStyle = C.grey; c.lineWidth = 3; c.stroke();
   c.restore();
   drawText(c, '?', x, y - s * 0.5, { size: s * 0.6, color: C.yellow, alpha, kind: 'up' });
 }
@@ -140,7 +140,7 @@ export function lightning(c, x, y, s, alpha) {
 // True/false toggle; state 0 = 假, 1 = 真.
 export function tfSwitch(c, x, y, state, alpha, w = 240, h = 74) {
   if (alpha <= 0) return;
-  rect(c, x - w / 2, y - h / 2, w, h, { fill: '#1b1b20', stroke: C.grey, width: 2.5, alpha, r: h / 2 });
+  rect(c, x - w / 2, y - h / 2, w, h, { fill: C.panel2, stroke: C.grey, width: 2.5, alpha, r: h / 2 });
   const kx = lerp(x - w / 4, x + w / 4, 1 - state), col = state > 0.5 ? C.green : C.red;
   rect(c, kx - w / 4 + 6, y - h / 2 + 6, w / 2 - 12, h - 12, { fill: col + '66', stroke: col, width: 2, alpha, r: h / 2 - 6 });
   drawText(c, '真', x - w / 4, y, { size: 34, color: state > 0.5 ? C.white : C.grey, alpha });
@@ -181,7 +181,7 @@ export function unitLine(c, x0, x1, y, alpha, o = {}) {
 export function areaSquare(c, x, y, s, bw, ah, alpha, o = {}) {
   const { stripA = 1, labels = true, wLabel = 'w', hLabel = 'h', areaLabel = '', totalLabel = '', showA = 1, bCol = C.green, aCol = C.yellow } = o;
   if (alpha <= 0) return;
-  rect(c, x, y, s, s, { fill: '#141418', stroke: C.white, width: 3, alpha });
+  rect(c, x, y, s, s, { fill: C.panel, stroke: C.white, width: 3, alpha });
   rect(c, x, y, s * bw, s, { fill: bCol + '40', stroke: bCol, width: 2.5, alpha: alpha * stripA });
   if (showA > 0) rect(c, x, y + s * (1 - ah), s * bw, s * ah, { fill: aCol + '77', stroke: aCol, width: 2.5, alpha: alpha * showA });
   if (totalLabel) drawMath(c, totalLabel, x + s - 30, y + 46, { size: 38, color: C.grey, alpha });
@@ -215,7 +215,7 @@ export function assocTree(c, cx, top, left, alpha, prog = 1, cols = [C.yellow, C
   leaves.forEach(([lx, s], i) => drawMath(c, s, lx, leafY + 14, { size: 46, color: cols[i], alpha }));
   for (const [P, q] of [[mid, p1], [root, p2]]) {
     if (q <= 0) continue;
-    dot(c, P[0], P[1], 26, { color: '#1b1b20', alpha: alpha * q });
+    dot(c, P[0], P[1], 26, { color: C.panel2, alpha: alpha * q });
     c.save(); c.globalAlpha = alpha * q; c.strokeStyle = C.white; c.lineWidth = 2.5; c.beginPath(); c.arc(P[0], P[1], 26, 0, Math.PI * 2); c.stroke(); c.restore();
     drawMath(c, 'F', P[0], P[1] + 12, { size: 34, alpha: alpha * q });
   }
@@ -224,7 +224,7 @@ export function assocTree(c, cx, top, left, alpha, prog = 1, cols = [C.yellow, C
 export function bubble(c, s, x, y, alpha, color = C.blue, size = 40) {
   if (alpha <= 0) return;
   const w = [...s].length * size + 70;
-  rect(c, x - w / 2, y - size * 1.2, w, size * 2.4, { stroke: color, width: 2.5, alpha, r: size * 1.2, fill: '#141418' });
+  rect(c, x - w / 2, y - size * 1.2, w, size * 2.4, { stroke: color, width: 2.5, alpha, r: size * 1.2, fill: C.panel });
   drawText(c, s, x, y, { size, alpha });
 }
 

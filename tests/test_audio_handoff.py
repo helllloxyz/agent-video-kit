@@ -62,7 +62,7 @@ class AudioHandoffTest(unittest.TestCase):
         self.assertNotEqual(self.run_tool("--source", str(self.source)).returncode, 0)
 
     def test_video_hints_are_handed_off_separately_from_headings(self):
-        text = "## 一、开场 <- 标题淡入 ->\n正文。\n<- 保留对象\n## 非章节\n逐步放大 ->\n更多。\n"
+        text = "## 一、开场 <@ 标题淡入 >\n正文。\n<@ 保留对象\n## 非章节\n逐步放大 >\n更多。\n"
         self.source.write_text(text, encoding="utf-8")
         (self.job / "parts/001_一、开场.md").write_text(text, encoding="utf-8")
         process = self.run_tool("--source", str(self.source))
@@ -74,7 +74,7 @@ class AudioHandoffTest(unittest.TestCase):
         self.assertIn("不进入配音、字幕", (self.job / "音频交接.md").read_text(encoding="utf-8"))
 
     def test_old_tts_containing_hints_is_not_marked_complete(self):
-        text = "标题正文<- 放大 ->。<#0.8#>"
+        text = "标题正文<@ 放大 >。<#0.8#>"
         (self.job / "tts/001_一、开场_TTS.txt").write_text(text, encoding="utf-8")
         (self.job / "audio/001/request.json").write_text(json.dumps({"text": text}), encoding="utf-8")
         process = self.run_tool("--source", str(self.source))

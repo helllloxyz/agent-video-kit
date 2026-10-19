@@ -4,7 +4,7 @@ import {parseArgs} from 'node:util';
 import {resolve, join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createCanvas, ffmpeg} from './runtime.mjs';
-import {C, W, H, SAFE, smooth, clamp, drawText, textWidth, rect, fontStatus} from './lib.mjs';
+import {C, W, H, SAFE, STYLE, smooth, clamp, drawText, textWidth, rect, fontStatus} from './lib.mjs';
 
 const CAPTION = {top: SAFE.captionTop, size: 38};
 import {buildTimeline, toSrt, chapterMetadata, chapterList} from './timeline.mjs';
@@ -44,6 +44,7 @@ async function main() {
   const info = {width: W, height: H, fps: FPS, duration: TL.duration, timing: TL.timing, fonts: fontStatus,
     scenes: TL.scenes.map((s) => ({chapter: s.scene.chapter, start: s.start, end: s.end, beats: s.beats}))};
   if (mode === 'info') { console.log(JSON.stringify(info, null, 2)); return; }
+  for (const f of fontStatus) if (f.note) console.error(`字体提示（${f.family}）：${f.note}`);
   const [first, last] = sceneRange(v.scene, TL.scenes.length);
   const stillFiles = TL.scenes.flatMap((s, i) => (i < first || i > last ? [] : s.beats.map((b, j) => ({
     file: join(output, 'stills', `s${String(i + 1).padStart(2, '0')}_b${String(j).padStart(2, '0')}.png`),
@@ -67,10 +68,10 @@ async function main() {
     const cap = TL.captions.find((x) => t >= x.start && t < x.end);
     if (cap) {
       const alpha = clamp(Math.min((t - cap.start) / 0.12, (cap.end - t) / 0.12));
-      const size = Math.min(CAPTION.size, CAPTION.size * (W - 160) / Math.max(1, textWidth(cap.text, CAPTION.size)));
-      const w = textWidth(cap.text, size) + 56;
+      const size = Math.min(CAPTION.size, CAPTION.size * (W - 160) / Math.max(1, textWidth(cap.text, CAPTION.size, STYLE.caption)));
+      const w = textWidth(cap.text, size, STYLE.caption) + 56;
       rect(ctx, (W - w) / 2, CAPTION.top, w, 64, {fill: '#000000', alpha: 0.5 * alpha, r: 12});
-      drawText(ctx, cap.text, W / 2, CAPTION.top + 33, {size, color: C.white, alpha});
+      drawText(ctx, cap.text, W / 2, CAPTION.top + 33, {size, color: C.white, alpha, kind: STYLE.caption});
     }
     ctx.restore();
   }

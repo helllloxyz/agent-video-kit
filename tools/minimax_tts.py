@@ -175,8 +175,8 @@ def choose_voice(config):
 def build_request(text, config):
     if not isinstance(text, str) or not text.strip():
         raise TtsError("朗读文本不能为空")
-    if "<-" in text:
-        raise TtsError("朗读文本含视频制作提示；请先从 TTS 稿排除 <- ... -> 提示，再合成")
+    if "<@" in text:
+        raise TtsError("朗读文本含视频制作提示；请先从 TTS 稿排除 <@ ... > 提示，再合成")
     if len(text.encode("utf-16-le")) // 2 > TEXT_LIMIT:
         raise TtsError("单次最多 9000 个字符；请先分段，脚本不会改写或截断正文")
     voice = {"voice_id": config["voice_id"], "speed": config["speed"],

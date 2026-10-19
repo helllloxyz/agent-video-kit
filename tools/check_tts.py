@@ -249,8 +249,8 @@ def check_output_format(out):
     stripped = PAUSE_RE.sub("", out)
     if "<#" in stripped or "#>" in stripped:
         errors.append("存在不完整的停顿标记")
-    if "<-" in stripped:
-        errors.append("TTS 中残留视频制作提示 <- ... ->；仅供画面制作，不可朗读")
+    if "<@" in stripped:
+        errors.append("TTS 中残留视频制作提示 <@ ... >；仅供画面制作，不可朗读")
 
     pieces = PAUSE_RE.split(out)[::2]
     if len(pieces) > 1:

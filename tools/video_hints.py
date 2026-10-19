@@ -1,4 +1,4 @@
-"""识别源稿中的 <- 视频制作提示 ->，保留原位置供视频阶段使用。"""
+"""识别源稿中的 <@ 视频制作提示 >，保留原位置供视频阶段使用。"""
 
 import re
 
@@ -7,7 +7,7 @@ MATH = r"\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|(?<!\\)\$[^$\n]+?(?<
 CODE = r"(?P<fence>^ {0,3}(?P<marker>`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}(?P=marker)[ \t]*(?=\r?$))|(?P<inline>`+)[^`\n]*(?P=inline)"
 TOKENS = re.compile(
     rf"(?P<protected>{CODE}|{MATH}|<!--[\s\S]*?-->|<(?:https?://|mailto:)[^<>\s]+>|<#[^<>]*>)"
-    r"|(?P<hint><-(?:(?!<-|->)[\s\S])*->)|(?P<unclosed><-)",
+    r"|(?P<hint><@(?:(?!<@|>)[\s\S])*>)|(?P<unclosed><@)",
     re.M,
 )
 
@@ -18,10 +18,10 @@ def video_hints(text):
     for match in TOKENS.finditer(text):
         if match.lastgroup == "unclosed":
             line = text.count("\n", 0, match.start()) + 1
-            raise ValueError(f"源第 {line} 行视频提示 <- ... -> 未闭合或存在嵌套")
+            raise ValueError(f"源第 {line} 行视频提示 <@ ... > 未闭合或存在嵌套")
         if match.lastgroup != "hint":
             continue
-        hints.append({"text": match[0][2:-2].strip(), "sourceText": match[0],
+        hints.append({"text": match[0][2:-1].strip(), "sourceText": match[0],
                       "sourceRange": [match.start(), match.end()],
                       "sourceLines": [text.count("\n", 0, match.start()) + 1,
                                       text.count("\n", 0, match.end() - 1) + 1]})

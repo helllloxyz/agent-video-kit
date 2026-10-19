@@ -7,13 +7,13 @@
 1. 读取任务目录、`manifest.json` 和 `音频交接.md`，找到原稿、TTS 稿、各段音频、同次字幕及时间轴。`manifest.json` 缺少 `decodedDurationMs` 或 `headings` 时，运行 `python3 tools/audio_handoff.py outputs/<任务>` 补齐（只读取已有产物，不调用配音接口）。已有音频直接复用；明确要求配音但尚无音频时，按 [音频流程](audio_workflow.md) 准备或接收交接。
 2. 画面与公式以原始讲稿为准，即使 TTS 读法有误也不改变原式；配音使用已有音轨。
 3. `alignment/` 仅记录原稿与 TTS 文本的对应，不含音频时间。服务字幕有句子级音频时间，句内位置按朗读字符插值，属于估算。
-4. 读取原稿中的 `<- ... ->` 及清单中各段 `videoHints`，按 [视频制作提示约定](video_hints.md) 将其用于分镜和动画，排除于字幕、配音和章节标题。旧任务若尚未记录提示，重跑文本检查与交接补齐；TTS 未变时继续复用配音。无配音任务也先分离提示与字幕正文。
+4. 读取原稿中的 `<@ ... >` 及清单中各段 `videoHints`，按 [视频制作提示约定](video_hints.md) 将其用于分镜和动画，排除于字幕、配音和章节标题。旧任务若尚未记录提示，重跑文本检查与交接补齐；TTS 未变时继续复用配音。无配音任务也先分离提示与字幕正文。
 
 ## 环境与技术
 
 - 使用 Node.js 20+ 与 npm；共享依赖位于 `.local-deps/video`（`@napi-rs/canvas`、`ffmpeg-static`），首次在仓库根执行 `npm ci --prefix .local-deps/video`，按锁文件安装当前平台依赖及 FFmpeg。仓库渲染脚本直接加载共享依赖，各任务无需复制引擎或软链 `node_modules`，也不需要全局 FFmpeg。
 - macOS 支持时优先使用 `h264_videotoolbox`，不可用时检测并使用实际可用的 H.264 编码器，如 `libx264`；不假定一定有硬件编码器。Agent 沙箱内硬件编码器可能初始化失败，用 `--encoder libx264` 即可，17 分钟成片在 Apple Silicon 上约需 2.5 分钟。
-- 按名称检测已安装字体，中文优先 Hiragino Sans GB / Noto Sans CJK SC，公式优先 STIX；缺失时安装开放字体 Noto Sans CJK 与 DejaVu 或 STIX，或按 [脚本接口](video_engine.md#绘图与字体) 指定字体文件。字体不随仓库分发，不依赖固定系统路径；记录实际选择并检查字符覆盖。
+- 按名称检测已安装字体：画面正文默认宋体（Songti SC / Noto Serif CJK SC / Source Han Serif SC），字幕用黑体（Hiragino Sans GB / Noto Sans CJK SC），公式用 STIX。首次在仓库根运行 `python3 tools/video_engine/setup_fonts.py`，从已安装的宋体集合中拆出 Regular 与 Bold 到 `.local-deps/fonts/`（`.ttc` 在画布中只暴露第一个字面，macOS 的 Songti SC 只剩 Black）；首次运行会把 fontTools 装到 `.local-deps/fonttools`。找不到宋体时安装开放字体 Noto Serif CJK SC 后重跑；仍缺失时正文自动回退黑体，`render.mjs info` 的 `fonts` 中 `Song` 带 `note`，渲染时在终端提示，须在制作说明中注明。黑体或公式字体缺失时安装 Noto Sans CJK 与 DejaVu 或 STIX，或按 [脚本接口](video_engine.md#绘图与字体) 指定字体文件。字体不随仓库分发，不依赖固定系统路径；记录实际选择并检查字符覆盖。
 - 任务代码放在本次 `video/src/`：`scenes.mjs` 写分镜表（句子范围、节拍、过渡），按章节拆分绘图代码（如 `ch_*.mjs`），本片共用的配色、字号和反复出现的图形放 `style.mjs`，封面放 `cover.mjs`。通用能力（新图标、公式命令、工具参数）回补到 `tools/video_engine/` 并补测试，不在任务里复制引擎。环境缺项时报告，不改全局配置。
 
 ## 视频制作
@@ -29,7 +29,7 @@
 其他情形：
 
 - 多段音频不能直接拼接每段从零开始的时间轴；`prepare.mjs` 已按实测时长累加偏移。仅有音频没有服务字幕时，先检查可用的转写/对齐工具；估算时间须注明，不为补时间轴重新合成。
-- 无配音时制作无声视频与烧录字幕，先排除 `<- ... ->` 提示，再将正文写入 `lines`，按约 4.6 字/秒安排阅读时间；提示本身不计阅读时长。
+- 无配音时制作无声视频与烧录字幕，先排除 `<@ ... >` 提示，再将正文写入 `lines`，按约 4.6 字/秒安排阅读时间；提示本身不计阅读时长。
 
 ## 交付与限制
 

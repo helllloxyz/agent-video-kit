@@ -31,7 +31,7 @@ function main() {
   const spokenFallback = new Set();
   manifest.parts.forEach((part, index) => {
     const tts = readFileSync(join(job, part.tts), 'utf8');
-    if (tts.includes('<-')) throw new Error(`第 ${index + 1} 段 TTS 稿残留视频制作提示；先检查朗读稿及音频，再准备字幕`);
+    if (tts.includes('<@')) throw new Error(`第 ${index + 1} 段 TTS 稿残留视频制作提示；先检查朗读稿及音频，再准备字幕`);
     const N = normalizeSpoken(tts);
     // Sentence text is cut from the TTS script (service subtitles may drop spaces); times come from the service.
     const clean = cleanSpoken(tts), rawAt = [...clean.matchAll(/\S/gu)].map((m) => m.index);

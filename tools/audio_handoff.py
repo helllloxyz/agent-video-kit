@@ -97,8 +97,8 @@ def check_part(ffmpeg, job, index, part, source_offset, source_line):
     result = json.loads((audio / "result.json").read_text(encoding="utf-8"))
     request = json.loads((audio / "request.json").read_text(encoding="utf-8"))
     text = tts.read_text(encoding="utf-8") if tts.is_file() else ""
-    if "<-" in text:
-        errors.append("TTS 稿残留视频制作提示 <- ... ->，不能作为已完成音频交接")
+    if "<@" in text:
+        errors.append("TTS 稿残留视频制作提示 <@ ... >，不能作为已完成音频交接")
     if not result.get("ok"):
         errors.append("result.json 不是成功状态")
     if request.get("text") != text:
@@ -173,7 +173,7 @@ def main():
              "- alignment/ 由 check_tts.py 纯脚本生成，只记录原稿与朗读稿的字符对应，不含音频时间。",
              "- 各段 timeline.json 的 subtitles 来自 MiniMax，从零开始；paragraphs 按字符插值，属于估算。",
              "- 连续视频由视频流程按 decodedDurationMs 累加偏移；画面和公式以原稿为准。", "",
-             "- 各段 videoHints 保留 <- ... -> 视频制作提示及源行号，只用于分镜和动画，不进入配音、字幕或章节标题，也不自带时长。", "",
+             "- 各段 videoHints 保留 <@ ... > 视频制作提示及源行号，只用于分镜和动画，不进入配音、字幕或章节标题，也不自带时长。", "",
              "| 段 | 章节 | 音频 | 实际时长（秒） | 字幕句数 |", "| --- | --- | --- | ---: | ---: |"]
     for index, (row, check) in enumerate(zip(rows, checks), 1):
         duration = "%.3f" % (row["decodedDurationMs"] / 1000) if "decodedDurationMs" in row else "—"

@@ -37,10 +37,10 @@ test('explicit timing retains provided timestamps and rejects overlap or mixed m
 });
 
 test('raw video hints cannot leak through silent lines, explicit captions or chapter labels', () => {
-  assert.throws(() => buildTimeline([{chapter: '一', lines: ['正文<- 放大 ->'], draw}]), /残留视频制作提示/);
+  assert.throws(() => buildTimeline([{chapter: '一', lines: ['正文<@ 放大 >'], draw}]), /残留视频制作提示/);
   const scene = {chapter: '一', start: 0, end: 1, draw};
-  assert.throws(() => buildTimeline([scene], {captions: [{start: 0, end: 1, text: '正文<- 放大 ->'}]}), /残留视频制作提示/);
-  assert.throws(() => buildTimeline([{...scene, chapter: '一<- 淡入 ->'}]), /残留视频制作提示/);
+  assert.throws(() => buildTimeline([scene], {captions: [{start: 0, end: 1, text: '正文<@ 放大 >'}]}), /残留视频制作提示/);
+  assert.throws(() => buildTimeline([{...scene, chapter: '一<@ 淡入 >'}]), /残留视频制作提示/);
   assert.equal(buildTimeline([{chapter: '一', lines: ['普通 <说明> 和 0 < x < 1'], draw}]).captions[0].text, '普通 <说明> 和 0 < x < 1');
 });
 
@@ -59,6 +59,13 @@ test('LaTeX becomes readable caption text', () => {
   assert.equal(latexToText(String.raw`$P(A \mid C) + P(\overline{A} \mid C) = 1$`), 'P(A|C) + P(A̅|C) = 1');
   assert.equal(latexToText(String.raw`$$x_2 > x_1 \;\Longrightarrow\; F(x_2, y) \gt F(x_1, y)$$`), 'x₂ > x₁ ⟹ F(x₂, y) > F(x₁, y)');
   assert.equal(latexToText(String.raw`$A + B = \overline{\overline{A}\,\overline{B}}$`), 'A + B = ¬(A̅ B̅)');
+  assert.equal(latexToText(String.raw`$\boxed{F(a, x) = f^{-1}\big( f(a) + f(x) \big)}$`), 'F(a, x) = f⁻¹(f(a) + f(x))');
+  assert.equal(latexToText(String.raw`$\mathbb{R}$`), 'ℝ');
+  assert.equal(latexToText(String.raw`$v(x) = \left.\dfrac{\partial F(a,x)}{\partial a}\right|_{a=e}$`), 'v(x) = (∂F(a, x))/(∂a)|ₐ₌ₑ');
+  assert.equal(latexToText(String.raw`$\frac{16}{17} \approx 94\%$`), '16/17 ≈ 94%');
+  assert.equal(latexToText(String.raw`$\frac{0.8}{1+x}$`), '0.8/(1 + x)');
+  assert.equal(latexToText(String.raw`$(a \ast b) \ast c$`), '(a * b) * c');
+  assert.equal(latexToText(String.raw`$x \mapsto ax+b$`), 'x ↦ ax + b');
 });
 
 test('captions restore formulas, split balanced and keep Latin words whole', () => {
@@ -152,7 +159,7 @@ test('video hints survive text/audio handoff but never enter prepared captions o
     for (const dir of ['parts', 'tts', 'alignment', 'audio/001']) mkdirSync(join(temp, dir), {recursive: true});
     const source = join(temp, 'source.md'), part = join(temp, 'parts/001.md');
     const tts = join(temp, 'tts/001_TTS.txt'), alignment = join(temp, 'alignment/001.alignment.json');
-    const manuscript = '## 第一章 <- 标题淡入 ->\n正文 $x^2$<- 放大曲线 ->。\n';
+    const manuscript = '## 第一章 <@ 标题淡入 >\n正文 $x^2$<@ 放大曲线 >。\n';
     const spoken = '第一章\n正文 x 的平方。<#0.8#>';
     writeFileSync(source, manuscript); writeFileSync(part, manuscript); writeFileSync(tts, spoken);
     const checked = runPython('check_tts.py', [part, tts, '--alignment-dir', join(temp, 'alignment')]);
@@ -176,8 +183,8 @@ test('video hints survive text/audio handoff but never enter prepared captions o
     assert.equal(timeline.videoHints[1].part, 1);
     assert.equal(timeline.chapters[0].title, '第一章');
     assert.match(timeline.sentences[1].text, /x²/);
-    assert.doesNotMatch(JSON.stringify([...timeline.sentences, ...timeline.captions, ...timeline.chapters]), /放大曲线|标题淡入|<-|->/);
-    assert.doesNotMatch(toSrt(timeline.captions), /放大曲线|标题淡入|<-/);
+    assert.doesNotMatch(JSON.stringify([...timeline.sentences, ...timeline.captions, ...timeline.chapters]), /放大曲线|标题淡入|<@/);
+    assert.doesNotMatch(toSrt(timeline.captions), /放大曲线|标题淡入|<@/);
     assert.match(readFileSync(join(out, 'sentences.md'), 'utf8'), /视频制作提示/);
     assert.equal(readFileSync(source, 'utf8'), manuscript);
     const stale = JSON.parse(readFileSync(alignment, 'utf8')); delete stale.videoHints;
@@ -195,13 +202,46 @@ test('math commands cannot silently disappear', {skip: !ready}, async () => {
   assert.ok(box.glyphs.some((g) => g.ch === '|'));
   assert.ok(mathLayout(String.raw`x_2 > x_1 \;\Longrightarrow\; F\Big[F\big(x, y\big), z\Big]`, 40).glyphs.some((g) => g.ch === '⟹'));
   assert.throws(() => mathLayout(String.raw`\begin{aligned}a&=b\end{aligned}`, 40), /drawAligned/);
+  const star = mathLayout(String.raw`a \ast b`, 40).glyphs.find((g) => g.ch === '∗');
+  assert.equal(star?.kind, 'sym');
+  assert.ok(star.x > mathLayout('a', 40).w + 40 * 0.2, 'binary ∗ gets operator spacing');
+  assert.ok(mathLayout(String.raw`94\%`, 40).glyphs.some((g) => g.ch === '%'), 'escaped percent is drawn');
 });
 
-test('colored italic letters keep the italic correction before upright glyphs', {skip: !ready}, async () => {
-  const {mathLayout} = await import('../tools/video_engine/lib.mjs');
-  const paren = (src) => mathLayout(src, 40).glyphs.find((g) => g.ch === '(').x;
-  assert.equal(paren(String.raw`\c{gold}{f}(x)`), paren('f(x)'));
-  assert.ok(paren('f(x)') >= mathLayout('f', 40).w + 40 * 0.12, 'the overhanging italic f gets extra room');
+test('italic math (opt-in) keeps the italic correction before upright glyphs and superscripts', {skip: !ready}, async () => {
+  const {mathLayout, setStyle} = await import('../tools/video_engine/lib.mjs');
+  setStyle({mathItalic: true});
+  try {
+    const paren = (src) => mathLayout(src, 40).glyphs.find((g) => g.ch === '(').x;
+    assert.equal(paren(String.raw`\c{gold}{f}(x)`), paren('f(x)'));
+    assert.ok(paren('f(x)') >= mathLayout('f', 40).w + 40 * 0.12, 'the overhanging italic f gets extra room');
+    const supX = (tex) => mathLayout(tex, 40).glyphs.find((g) => g.ch === '1').x;
+    const gap = (base) => supX(`${base}^{-1}`) - mathLayout(base, 40).w;
+    assert.ok(gap('f') > gap('a') && gap('a') > gap('2'), 'superscripts after italic letters get italic correction, most after f');
+  } finally { setStyle({mathItalic: false}); }
+});
+
+test('default style: Song text when a Regular face exists, sans captions, upright math; setStyle overrides', {skip: !ready}, async () => {
+  const {setStyle, fontStr, registerFont, mathLayout, STYLE, fontStatus, C} = await import('../tools/video_engine/lib.mjs');
+  const saved = {...STYLE};
+  try {
+    assert.deepEqual(saved, {text: 'song', caption: 'sans', mathItalic: false});
+    assert.equal(C.bg, '#1d1c1a');
+    assert.ok(C.panel && C.clay, 'palette exposes panel and accent tokens');
+    assert.doesNotMatch(fontStr('it', 40), /italic/);
+    const song = fontStatus.find((s) => s.family === 'Song');
+    assert.match(fontStr('hei', 40, 'bold'), song.usable ? /^bold 40px "Song"/ : /^bold 40px "Hei"/, 'Song falls back to Hei without a Regular face');
+    if (!song.usable) assert.match(song.note, /setup_fonts\.py/);
+    assert.match(fontStr('sans', 40), /"Hei"/, 'sans always stays Hei, e.g. for captions');
+    const paren = mathLayout('f(x)', 40).glyphs.find((g) => g.ch === '(').x;
+    assert.ok(paren < mathLayout('f', 40).w + 40 * 0.05, 'upright letters get no italic correction');
+    setStyle({text: 'sans', mathItalic: true});
+    assert.match(fontStr('it', 40), /^italic /);
+    assert.match(fontStr('hei', 40), /"Hei"/);
+    assert.throws(() => setStyle({text: 'kai'}), /未知字体风格/);
+    assert.throws(() => registerFont('Nope', '/x.ttf'), /未知字体族/);
+    assert.throws(() => registerFont('Song', '/no/such/font.ttf'), /无法注册字体文件/);
+  } finally { setStyle(saved); }
 });
 
 test('aligned rows split on line breaks and the first ampersand', {skip: !ready}, async () => {

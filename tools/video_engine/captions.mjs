@@ -11,11 +11,13 @@ const SYMBOLS = {
   Rightarrow: '⇒', Leftarrow: '⇐', Longrightarrow: '⟹', implies: '⟹', Leftrightarrow: '⇔', iff: '⟺', neg: '¬',
   land: '∧', lor: '∨', cap: '∩', cup: '∪', in: '∈', subset: '⊂', forall: '∀', exists: '∃', partial: '∂',
   sum: '∑', prod: '∏', int: '∫', ldots: '…', cdots: '⋯', dots: '…', prime: '′', R: 'ℝ',
+  ast: '*', star: '⋆', circ: '∘', mapsto: '↦', lvert: '|', rvert: '|', downarrow: '↓', uparrow: '↑',
   alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', theta: 'θ', lambda: 'λ', mu: 'μ', pi: 'π',
   sigma: 'σ', tau: 'τ', phi: 'φ', omega: 'ω', Delta: 'Δ', Sigma: 'Σ', Omega: 'Ω',
 };
-const SUB = {0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉', '+': '₊', '-': '₋', n: 'ₙ', i: 'ᵢ'};
-const SUP = {0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹', '+': '⁺', '-': '⁻', n: 'ⁿ'};
+const SUB = {0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉', '+': '₊', '-': '₋', '−': '₋', '=': '₌', n: 'ₙ', i: 'ᵢ', a: 'ₐ', e: 'ₑ', x: 'ₓ'};
+const SUP = {0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹', '+': '⁺', '-': '⁻', '−': '⁻', n: 'ⁿ', p: 'ᵖ', x: 'ˣ'};
+const BLACKBOARD = {R: 'ℝ', N: 'ℕ', Z: 'ℤ', Q: 'ℚ', C: 'ℂ'};
 const IGNORED = new Set(['big', 'Big', 'bigg', 'Bigg', 'left', 'right', 'displaystyle', 'begin', 'end']);
 const RELATIONS = /\s*([=+<>≤≥≠≈⟹⇒⇔⟺→−])\s*/g;
 
@@ -44,9 +46,14 @@ export function latexToText(src) {
           // A combining bar only reads well over a single plain letter; nested or long negations use ¬(…).
           out += [...arg].length === 1 ? arg + '\u0305' : `¬(${arg})`; continue;
         }
-        if (name === 'frac') { const a = (i++, group()), b = (i++, group()); out += `${a.length > 1 ? `(${a})` : a}/${b.length > 1 ? `(${b})` : b}`; continue; }
+        if (name === 'mathbb') { const a = (s[i] === '{' ? (i++, group()) : s[i++]).trim(); out += [...a].map((ch) => BLACKBOARD[ch] ?? ch).join(''); continue; }
+        if (name === 'left' || name === 'right') { if (s[i] === '.') i++; continue; }
+        if (name === 'frac' || name === 'dfrac' || name === 'tfrac') {
+          const a = (i++, group()).trim(), b = (i++, group()).trim(), wrap = (v) => (/^(\d+(\.\d+)?|[A-Za-z])$/.test(v) ? v : `(${v})`);
+          out += `${wrap(a)}/${wrap(b)}`; continue;
+        }
         if (name === 'sqrt') { const a = s[i] === '{' ? (i++, group()) : s[i++]; out += `√${a.length > 1 ? `(${a})` : a}`; continue; }
-        if (['text', 'mathrm', 'operatorname', 'textbf', 'mathbf', 'mathit', 't', 'op'].includes(name)) { if (s[i] === '{') { i++; out += group(); } continue; }
+        if (['text', 'mathrm', 'operatorname', 'textbf', 'mathbf', 'mathit', 't', 'op', 'boxed'].includes(name)) { if (s[i] === '{') { i++; out += group(); } continue; }
         if (name === 'c' || name === 'm') { if (s[i] === '{') { i++; group(); } continue; }
         if (name === 'quad' || name === 'qquad') { out += ' '; continue; }
         if (IGNORED.has(name)) { if ((name === 'begin' || name === 'end') && s[i] === '{') { i++; group(); } continue; }
@@ -57,7 +64,7 @@ export function latexToText(src) {
     }
     return out;
   };
-  return group().split('\n').map((line) => line.replace(/\s+/g, ' ').replace(RELATIONS, ' $1 ').replace(/\s*,\s*/g, ', ').replace(/\(\s+/g, '(').replace(/\s+\)/g, ')').replace(/\s*\|\s*/g, '|').replace(/\s+/g, ' ').trim()).filter(Boolean).join('；');
+  return group().split('\n').map((line) => line.replace(/\s+/g, ' ').replace(RELATIONS, ' $1 ').replace(/\s*,\s*/g, ', ').replace(/\(\s+/g, '(').replace(/\s+\)/g, ')').replace(/\s*\|\s*/g, '|').replace(/([∂∫√])\s+/g, '$1').replace(/\s+/g, ' ').trim()).filter(Boolean).join('；');
 }
 
 // Display text of a replaced source fragment, e.g. "1. $P(A \mid C)$" → "1. P(A|C)".
