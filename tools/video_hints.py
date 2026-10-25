@@ -1,40 +1,61 @@
-"""识别源稿中的 <@ 视频制作提示 >，保留原位置供视频阶段使用。"""
+"""识别 visual HTML 注释，保留源位置供视频阶段使用。"""
 
 import re
 
-# 公式、代码、网址和 HTML 注释中的标记不作为视频提示。
+# 代码、公式、网址和停顿标记里的注释写法均作为字面内容。
 MATH = r"\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)|(?<!\\)\$[^$\n]+?(?<!\\)\$"
 CODE = r"(?P<fence>^ {0,3}(?P<marker>`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}(?P=marker)[ \t]*(?=\r?$))|(?P<inline>`+)[^`\n]*(?P=inline)"
 TOKENS = re.compile(
-    rf"(?P<protected>{CODE}|{MATH}|<!--[\s\S]*?-->|<(?:https?://|mailto:)[^<>\s]+>|<#[^<>]*>)"
-    r"|(?P<hint><@(?:(?!<@|>)[\s\S])*>)|(?P<unclosed><@)",
+    rf"(?P<protected>{CODE}|{MATH}|<(?:https?://|mailto:)[^<>\s]+>|<#[^<>]*>)"
+    r"|(?P<comment><!--(?:(?!<!--|-->)[\s\S])*-->)|(?P<bad_comment><!--)"
+    r"|(?P<deprecated><[@*])",
     re.M,
 )
 
 
-def video_hints(text):
-    """返回提示正文、原文、字符范围和行号；不推断音频时间。"""
-    hints = []
+def _annotations(text):
     for match in TOKENS.finditer(text):
-        if match.lastgroup == "unclosed":
+        if match.lastgroup == "deprecated":
             line = text.count("\n", 0, match.start()) + 1
-            raise ValueError(f"源第 {line} 行视频提示 <@ ... > 未闭合或存在嵌套")
-        if match.lastgroup != "hint":
+            raise ValueError(f"源第 {line} 行使用已停用标记；请将作者说明或画面提示改为 HTML 注释")
+        if match.lastgroup == "bad_comment":
+            line = text.count("\n", 0, match.start()) + 1
+            raise ValueError(f"源第 {line} 行 HTML 注释未闭合或存在嵌套")
+        if match.lastgroup != "comment":
             continue
-        hints.append({"text": match[0][2:-1].strip(), "sourceText": match[0],
-                      "sourceRange": [match.start(), match.end()],
-                      "sourceLines": [text.count("\n", 0, match.start()) + 1,
-                                      text.count("\n", 0, match.end() - 1) + 1]})
-    return hints
+        body = match[0][4:-3].strip()
+        visual = re.match(r"visual\s*:", body) is not None
+        if visual:
+            body = re.sub(r"^visual\s*:\s*", "", body)
+        yield visual, {"text": body, "sourceText": match[0],
+                       "sourceRange": [match.start(), match.end()],
+                       "sourceLines": [text.count("\n", 0, match.start()) + 1,
+                                       text.count("\n", 0, match.end() - 1) + 1]}
 
 
-def strip_video_hints(text, preserve_layout=False):
-    """排除提示；保留换行，必要时以空格保留全部偏移，原稿不变。"""
+def video_hints(text):
+    """只交接 visual 注释，不交接 author 或普通注释。"""
+    return [hint for visual, hint in _annotations(text) if visual]
+
+
+def _strip(text, preserve_layout, all_comments):
     chunks, pos = [], 0
-    for hint in video_hints(text):
+    for visual, hint in _annotations(text):
+        if not visual and not all_comments:
+            continue
         start, end = hint["sourceRange"]
         chunks.append(text[pos:start])
         chunks.append("".join(ch if ch in "\r\n" else " " if preserve_layout else ""
                               for ch in text[start:end]))
         pos = end
     return "".join(chunks) + text[pos:]
+
+
+def strip_video_hints(text, preserve_layout=False):
+    """只排除画面提示；用于核对只补 visual 的副本是否改动正文。"""
+    return _strip(text, preserve_layout, False)
+
+
+def strip_source_comments(text, preserve_layout=False):
+    """排除所有 HTML 注释，保留换行及可选偏移。"""
+    return _strip(text, preserve_layout, True)

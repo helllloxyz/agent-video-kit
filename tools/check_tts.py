@@ -17,9 +17,9 @@ import sys
 from pathlib import Path
 
 if __package__:
-    from .video_hints import strip_video_hints, video_hints
+    from .video_hints import strip_source_comments, video_hints
 else:
-    from video_hints import strip_video_hints, video_hints
+    from video_hints import strip_source_comments, video_hints
 
 ALLOWED_TAGS = ("breath", "emm", "chuckle")
 TAG_DENSITY_LIMIT = 2  # 每千字
@@ -31,7 +31,6 @@ ALLOWED_TAG_RE = re.compile(r"\((?:%s)\)" % "|".join(ALLOWED_TAGS))
 PRONOUNCEABLE_RE = re.compile(r"[\u3400-\u9fffA-Za-z0-9]")
 
 FENCE_RE = re.compile(r"^[ \t]*(```|~~~)[^\n]*\n.*?^[ \t]*\1[^\n]*$", re.M | re.S)
-HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 MATH_RE = re.compile(
     r"\$\$.+?\$\$|\\\[.+?\\\]|\\\(.+?\\\)|(?<!\\)\$[^$\n]+?(?<!\\)\$", re.S
 )
@@ -69,7 +68,7 @@ def offset_to_line(text, offset):
     return text.count("\n", 0, offset) + 1
 
 
-def parse_source(src):
+def parse_source(src, visual_headings=False):
     """返回 (parts, gaps)。parts 由 ('lit', 文本, 行号列表) 和 ('gap', [gap 下标]) 交替组成。"""
     gaps = []
 
@@ -85,9 +84,11 @@ def parse_source(src):
         return pattern.sub(repl, text)
 
     # 提示是零朗读内容，不能当作允许任意读法的 gap，否则会漏检提示泄漏。
-    text = strip_video_hints(src.replace("\r\n", "\n"), preserve_layout=True)
+    text = strip_source_comments(src.replace("\r\n", "\n"), preserve_layout=True)
     text = replace_block(FENCE_RE, "代码", text)
-    text = replace_block(HTML_COMMENT_RE, "注释", text)
+    # 在公式替换前排除展示标题，避免标题里的公式成为可任意填入读法的 gap。
+    if visual_headings:
+        text = re.sub(r"^[ \t]{0,3}#{1,6}(?:[ \t]+[^\n]*|[ \t]*)$", "", text, flags=re.M)
     text = replace_block(MATH_RE, "公式", text)
 
     items = []  # ('c', 字符, 行号) 或 ('g', gap 下标)
@@ -108,7 +109,7 @@ def parse_source(src):
             else:
                 parts.append(("gap", [item[1]]))
         else:
-            if parts and parts[-1][0] == "lit":
+            if parts and parts[-1][0] == "lit" and (not visual_headings or parts[-1][2][-1] == item[2]):
                 parts[-1][1].append(item[1])
                 parts[-1][2].append(item[2])
             else:
@@ -249,8 +250,10 @@ def check_output_format(out):
     stripped = PAUSE_RE.sub("", out)
     if "<#" in stripped or "#>" in stripped:
         errors.append("存在不完整的停顿标记")
-    if "<@" in stripped:
-        errors.append("TTS 中残留视频制作提示 <@ ... >；仅供画面制作，不可朗读")
+    if "<!--" in stripped or "-->" in stripped:
+        errors.append("TTS 中残留 HTML 注释；请排除注释后再合成")
+    if "<@" in stripped or "<*" in stripped:
+        errors.append("TTS 中残留已停用标记 <@ ... > 或 <* ... >；请先迁移源稿为 HTML 注释并重新提取 TTS")
 
     pieces = PAUSE_RE.split(out)[::2]
     if len(pieces) > 1:
@@ -299,12 +302,12 @@ def md_cell(s):
     return clip(s.replace("\n", " ").replace("|", "\\|"), 120)
 
 
-def check_pair(src_path, out_path, alignment_path=None):
+def check_pair(src_path, out_path, alignment_path=None, visual_headings=False):
     src = src_path.read_text(encoding="utf-8")
     out = out_path.read_text(encoding="utf-8")
     try:
         hints = video_hints(src)
-        parts, gaps = parse_source(src)
+        parts, gaps = parse_source(src, visual_headings=visual_headings)
     except ValueError as error:
         if alignment_path is not None:
             alignment_path.parent.mkdir(parents=True, exist_ok=True)
@@ -350,7 +353,7 @@ def check_pair(src_path, out_path, alignment_path=None):
                    "passed": not errors, "errors": errors, "warnings": warnings,
                    "offsetUnit": "Python Unicode code points, zero-based, end-exclusive",
                    "note": "正文按字符串顺序精确匹配；替换片段仍需人工审阅含义。此文件不含音频时间。",
-                   "videoHints": hints, "segments": alignment}
+                   "visualHeadings": visual_headings, "videoHints": hints, "segments": alignment}
         alignment_path.parent.mkdir(parents=True, exist_ok=True)
         alignment_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -358,6 +361,8 @@ def check_pair(src_path, out_path, alignment_path=None):
     lines.append(f"结果：{'通过' if not errors else f'未通过（{len(errors)} 个错误）'}")
     tags = "，".join(f"{t} {c}" for t, c in tag_counts.items())
     lines.append(f"停顿 {len(PAUSE_RE.findall(out))} 处；语气标签 {tags}；正文 {chars} 字")
+    if visual_headings:
+        lines.append("Markdown 井号标题按只展示处理；标题仍保留在源稿及交接 headings 中。")
     if hints:
         destination = "原文与位置已写入 alignment.videoHints" if alignment_path is not None else "使用 --alignment-dir 可导出原文与位置"
         lines.append(f"视频制作提示 {len(hints)} 处，已从朗读比对中排除；{destination}。")
@@ -411,6 +416,7 @@ def main():
     parser.add_argument("source", type=Path, help="源 Markdown 文件或目录")
     parser.add_argument("output", type=Path, help="TTS 文本文件或输出目录")
     parser.add_argument("--alignment-dir", type=Path, help="另存原文与 TTS 字符串对齐 JSON；无音频时间")
+    parser.add_argument("--visual-headings", action="store_true", help="井号标题只展示，不参与朗读比对；源稿标题保持不变")
     args = parser.parse_args()
 
     if not args.source.exists():
@@ -427,7 +433,7 @@ def main():
         if args.alignment_dir:
             relative = Path(src_path.name) if args.source.is_file() else src_path.relative_to(args.source)
             alignment_path = args.alignment_dir / relative.with_suffix(".alignment.json")
-        report, ok = check_pair(src_path, out_path, alignment_path)
+        report, ok = check_pair(src_path, out_path, alignment_path, visual_headings=args.visual_headings)
         reports.append(report)
         all_ok = all_ok and ok
 

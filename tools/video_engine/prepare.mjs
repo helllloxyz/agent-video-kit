@@ -31,7 +31,7 @@ function main() {
   const spokenFallback = new Set();
   manifest.parts.forEach((part, index) => {
     const tts = readFileSync(join(job, part.tts), 'utf8');
-    if (tts.includes('<@')) throw new Error(`第 ${index + 1} 段 TTS 稿残留视频制作提示；先检查朗读稿及音频，再准备字幕`);
+    if (/<[@*]|<!--|-->/.test(tts)) throw new Error(`第 ${index + 1} 段 TTS 稿残留视频制作提示；先检查朗读稿及音频，再准备字幕`);
     const N = normalizeSpoken(tts);
     // Sentence text is cut from the TTS script (service subtitles may drop spaces); times come from the service.
     const clean = cleanSpoken(tts), rawAt = [...clean.matchAll(/\S/gu)].map((m) => m.index);
@@ -62,16 +62,28 @@ function main() {
         spoken: rawSlice(range).replace(/\s+/g, ' '), text: mapped.units.map((u) => u.text).join('').trim(), units: mapped.units, range});
     }
     const partHeadings = part.headings ?? [...readFileSync(join(job, part.part), 'utf8').matchAll(/^ {0,3}(#{1,3})[ \t]+(.+?)[ \t]*#*[ \t]*$/gm)].map((m) => ({level: m[1].length, title: m[2].trim()}));
-    for (const h of partHeadings) {
-      const key = headingKey(h.title), at = N.indexOf(key);
-      if (!key || at < 0) throw new Error(`第 ${index + 1} 段找不到标题朗读位置：${h.title}`);
+    for (const [headingIndex, h] of partHeadings.entries()) {
+      const key = headingKey(h.title);
+      let at = N.indexOf(key);
+      if (alignment?.visualHeadings) {
+        // 展示标题没有朗读字符，绑定其后第一段口播（含引用式桥接）。
+        const sourceLine = h.originalSourceLine - (part.originalSourceFirstLine ?? 1) + 1;
+        const nextPeer = partHeadings.slice(headingIndex + 1).find((next) => next.level <= h.level);
+        const endLine = nextPeer ? nextPeer.originalSourceLine - (part.originalSourceFirstLine ?? 1) + 1 : Infinity;
+        const anchor = alignment.segments.find((seg) => seg.sourceLines[0] > sourceLine &&
+          seg.sourceLines[0] < endLine && seg.ttsNormalizedRange[1] > seg.ttsNormalizedRange[0]);
+        if (!anchor) throw new Error(`展示标题缺少后续口播定位：${h.title}；请检查源行号与 alignment，纯视觉章节需单独安排`);
+        at = anchor.ttsNormalizedRange[0];
+      }
+      if ((!key && !alignment?.visualHeadings) || at < 0) throw new Error(`第 ${index + 1} 段找不到标题朗读位置：${h.title}`);
       const owner = local.findIndex(({range}) => at >= range[0] && at < range[1]);
       if (owner < 0) throw new Error(`标题没有对应字幕时间：${h.title}`);
       const {s, range} = local[owner];
       const exact = at === range[0];
       const ms = exact ? s.startMs : s.startMs + (s.endMs - s.startMs) * (at - range[0]) / (range[1] - range[0]);
       headings.push({level: h.level, title: h.title, sourceLine: h.originalSourceLine, start: sec(offset + ms),
-        sentence: sentences.length - local.length + owner, timing: exact ? 'sentence_start' : 'character_interpolation_estimate'});
+        sentence: sentences.findIndex((sentence) => sentence.part === index + 1 && at >= sentence.range[0] && at < sentence.range[1]),
+        timing: alignment?.visualHeadings ? (exact ? 'following_speech_start' : 'following_speech_interpolation_estimate') : (exact ? 'sentence_start' : 'character_interpolation_estimate')});
     }
     offset += part.decodedDurationMs;
   });

@@ -10,7 +10,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.check_tts import check_output_format, check_pair, output_offsets, normalize_output
 from tools.split_markdown import pack_sections, split_sections
-from tools.video_hints import strip_video_hints, video_hints
+from tools.video_hints import strip_video_hints, strip_source_comments, video_hints
 
 
 class TextPipelineTests(unittest.TestCase):
@@ -77,6 +77,32 @@ class TextPipelineTests(unittest.TestCase):
             self.assertFalse(passed)
             self.assertFalse(json.loads(target.read_text())["passed"])
 
+    def test_visual_headings_and_display_material_keep_spoken_body_strict(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source, tts, target = root / "source.md", root / "tts.txt", root / "alignment.json"
+            source.write_text("# 比较 $v$\n## 总量与速度\n刚才只看路程。\n"
+                              "<!-- visual: 上屏内容：\n| 甲 | 100 米 |\n| 乙 | 90 米 |\n"
+                              "$$v=s/t$$\n制作安排：突出时间列。 -->\n"
+                              "还要比较时间。\n### 下一步\n我们再看变化。")
+            spoken = "刚才只看路程。还要比较时间。我们再看变化。<#0.8#>"
+            tts.write_text(spoken)
+            self.assertFalse(check_pair(source, tts)[1])
+            self.assertTrue(check_pair(source, tts, target, visual_headings=True)[1])
+            payload = json.loads(target.read_text())
+            self.assertTrue(payload["visualHeadings"])
+            self.assertIn("100 米", payload["videoHints"][0]["text"])
+            self.assertTrue(all(row["kind"] == "literal" for row in payload["segments"]))
+            self.assertEqual(payload["segments"][0]["sourceLines"], [3, 3])
+            for bad in (spoken.replace("还要比较时间。", ""),
+                        "总量与速度" + spoken, "100 米" + spoken):
+                tts.write_text(bad)
+                self.assertFalse(check_pair(source, tts, visual_headings=True)[1])
+            tts.write_text(spoken)
+            run = subprocess.run([sys.executable, "tools/check_tts.py", str(source), str(tts),
+                                  "--visual-headings"], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
     def test_literal_set_braces_are_preserved_but_formula_braces_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -92,7 +118,7 @@ class TextPipelineTests(unittest.TestCase):
             self.assertFalse(check_pair(source, tts)[1])
 
     def test_video_hints_preserve_positions_and_do_not_split_chapters(self):
-        source = "## 一 <@ 标题动画 >\r\n正文🙂<@ 保留曲线\r\n## 这是提示，不是章节\r\n再放大 >。\r\n## 二\r\n结束。"
+        source = "## 一 <!-- visual: 标题动画 -->\r\n正文🙂<!-- visual: 保留曲线\r\n## 这是提示，不是章节\r\n再放大 -->。\r\n## 二\r\n结束。"
         hints = video_hints(source)
         self.assertEqual(len(hints), 2)
         self.assertEqual([h["text"] for h in hints], ["标题动画", "保留曲线\r\n## 这是提示，不是章节\r\n再放大"])
@@ -107,20 +133,20 @@ class TextPipelineTests(unittest.TestCase):
         self.assertEqual([title for title, _ in sections], ["一", "二"])
         self.assertEqual("".join(text for _, text in sections), source)
 
-    def test_only_at_delimited_hints_are_excluded_and_syntax_is_protected(self):
-        source = ("普通 <说明> 和 0 < x < 1，停顿 <#0.8#>，初稿说明 <* 背景与要求 >。\n"
-                  "$x <@ y$，\\(a <@ b\\)，`<@ 代码 >`\n"
-                  "```text\n<@ 围栏内不是提示 >\n```\n"
-                  "<!-- <@ 注释内不是提示 > -->\n<https://example.com>\n"
-                  "真正<@ 镜头平移 >正文")
-        self.assertEqual([h["text"] for h in video_hints(source)], ["镜头平移"])
-        self.assertEqual(strip_video_hints(source), source.replace("<@ 镜头平移 >", ""))
+    def test_deprecated_markers_are_rejected_but_literals_are_protected(self):
+        for marker in ("<@ 提示 >", "<* 说明 >", "<@ 未闭合", "<* 未闭合"):
+            for operation in (video_hints, strip_source_comments, split_sections):
+                with self.assertRaisesRegex(ValueError, "已停用标记"):
+                    operation("正文" + marker)
+        source = '`<@ 代码 >` `$x$ <* 代码 >` $x <@ y$\n```text\n<* 示例 >\n```'
+        self.assertEqual(video_hints(source), [])
+        self.assertEqual(strip_source_comments(source), source)
 
     def test_alignment_excludes_hints_without_allowing_them_as_readings(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             source, tts, target = root / "source.md", root / "tts.txt", root / "alignment.json"
-            source.write_text("## 示例 <@ 标题淡入 >\n比较 $x^2$<@ 先画曲线\n再突出平方项 >，得到结果。")
+            source.write_text("## 示例 <!-- visual: 标题淡入 -->\n比较 $x^2$<!-- visual: 先画曲线\n再突出平方项 -->，得到结果。")
             spoken = "示例\n比较 x 的平方，得到结果。<#0.8#>"
             tts.write_text(spoken)
             report, passed = check_pair(source, tts, target)
@@ -128,9 +154,9 @@ class TextPipelineTests(unittest.TestCase):
             payload = json.loads(target.read_text())
             self.assertEqual(len(payload["videoHints"]), 2)
             self.assertEqual(payload["videoHints"][1]["sourceLines"], [2, 3])
-            self.assertFalse(any("<@" in s["sourceText"] for s in payload["segments"]))
+            self.assertFalse(any("<!--" in s["sourceText"] for s in payload["segments"]))
             self.assertEqual([s["sourceText"] for s in payload["segments"] if s["kind"] == "replacement"], ["$x^2$"])
-            for text in (spoken.replace("示例", "示例标题淡入"), spoken + "\n<@ 镜头推进 >"):
+            for text in (spoken.replace("示例", "示例标题淡入"), spoken + "\n<!-- visual: 镜头推进 -->"):
                 tts.write_text(text)
                 self.assertFalse(check_pair(source, tts)[1])
             tts.write_text(spoken)
@@ -138,12 +164,46 @@ class TextPipelineTests(unittest.TestCase):
             self.assertFalse(check_pair(source, tts, target)[1])
             self.assertFalse(json.loads(target.read_text())["passed"])
 
+    def test_html_comments_and_bridge_are_separate_from_spoken_content(self):
+        source_text = ("<!-- author: 要求\n## 假标题\n-->\n## 第一章\n"
+                       "> 承接上一节。\n> 现在比较变化。\n"
+                       "<!-- visual: 上屏表格\n## 非章节\nx > 0\n-->\n"
+                       "正文。<!-- 普通注释 -->\n## 第二章\n> 再看结果。")
+        self.assertEqual([title for title, _ in split_sections(source_text)], ["第一章", "第二章"])
+        hints = video_hints(source_text)
+        self.assertEqual(len(hints), 1)
+        self.assertIn("x > 0", hints[0]["text"])
+        self.assertEqual(hints[0]["sourceLines"], [7, 10])
+        start, end = hints[0]["sourceRange"]
+        self.assertEqual(source_text[start:end], hints[0]["sourceText"])
+        clean = strip_source_comments(source_text, preserve_layout=True)
+        self.assertEqual(len(clean), len(source_text))
+        self.assertIn("> 承接上一节。", clean)
+        self.assertNotIn("author:", clean)
+        self.assertIn("author:", strip_video_hints(source_text))
+        with tempfile.TemporaryDirectory() as temp:
+            src, tts, target = [Path(temp) / name for name in ("source.md", "tts.txt", "alignment.json")]
+            src.write_text(source_text)
+            spoken = "承接上一节。现在比较变化。正文。再看结果。<#0.8#>"
+            tts.write_text(spoken)
+            self.assertTrue(check_pair(src, tts, target, visual_headings=True)[1])
+            for bad in (spoken.replace("承接上一节。", ""), "要求" + spoken,
+                        "普通注释" + spoken, spoken + "<!-- visual: 泄漏 -->"):
+                tts.write_text(bad)
+                self.assertFalse(check_pair(src, tts, visual_headings=True)[1])
+        for malformed in ("<!-- visual: 未结束", "<!-- author: 外层 <!-- 内层 --> -->"):
+            with self.assertRaisesRegex(ValueError, "未闭合或存在嵌套"):
+                video_hints(malformed)
+        protected = '`<!-- visual: 代码 -->` $x<!-- visual: 公式 -->$'
+        self.assertEqual(video_hints(protected), [])
+        self.assertEqual(strip_source_comments(protected), protected)
+
     def test_unclosed_and_nested_hints_are_errors(self):
-        for text in ("正文<@ 没有结束", "正文<@ 外层 <@ 内层 > >"):
+        for text in ("正文<!-- visual: 没有结束", "正文<!-- visual: 外层 <!-- 内层 --> -->"):
             with self.assertRaisesRegex(ValueError, "未闭合或存在嵌套"):
                 split_sections(text)
         self.assertEqual(check_output_format("正文。<@ 未闭合")[0],
-                         ["TTS 中残留视频制作提示 <@ ... >；仅供画面制作，不可朗读"])
+                         ["TTS 中残留已停用标记 <@ ... > 或 <* ... >；请先迁移源稿为 HTML 注释并重新提取 TTS"])
         self.assertEqual(check_output_format("正文 <说明>，0 < x < 1。<#0.8#>")[0], [])
 
 

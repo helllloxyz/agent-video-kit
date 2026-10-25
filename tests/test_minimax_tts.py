@@ -132,7 +132,7 @@ class TtsTests(unittest.TestCase):
         self.assertEqual(len(self.requests), 1)
 
     def test_validation_before_network_and_no_overwrite(self):
-        for text in (" ", "字" * 9001, "😀" * 4501, "正文<@ 画面放大 >", "正文<@ 未闭合"):
+        for text in (" ", "字" * 9001, "😀" * 4501, "正文<@ 画面放大 >", "正文<@ 未闭合", "正文<* 作者说明 >", "正文<* 未闭合", "正文<!-- visual: 放大 -->", "正文<!-- author: 要求 -->", "正文<!-- 未闭合"):
             with self.assertRaises(tts.TtsError):
                 tts.synthesize_speech(text, self.output(), self.config())
         for kwargs in ({"speed": 0}, {"pitch": 1.5}, {"vol": float("nan")}, {"timeout": -1}):

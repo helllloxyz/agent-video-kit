@@ -26,11 +26,15 @@ node tools/video_engine/prepare.mjs --job outputs/本次任务
 - `timeline.json`：全片句子 `sentences[{id, part, start, end, spoken, text, chapter}]`、烧录字幕 `captions`、章节 `chapters`（顶层 `##` 标题）、小节 `sections`（`###`）、警告。
 - `sentences.md`：按章节列出句子编号、时间和字幕文字，编写分镜时查表。
 
-原稿中的 `<@ ... >` 按 [视频制作提示约定](video_hints.md) 处理：从各段 `manifest.json` 的 `videoHints`（缺少时回退到 alignment 的同名字段）汇总到 `timeline.json.videoHints`，保留提示、源位置并附段号 `part` 和拆分稿路径 `source`；`sentences.md` 另设提示区。提示不进入 `sentences`、`captions` 或章节标题，也不推断独立时间。含提示的旧任务先重跑 `check_tts.py --alignment-dir` 与音频交接，以免旧 alignment 将提示还原到字幕。
+实际拆分的适配稿中的 `<!-- visual: ... -->` 按 [视频制作提示约定](video_hints.md) 处理：从各段 `manifest.json` 的 `videoHints`（缺少时回退到 alignment 的同名字段）汇总到 `timeline.json.videoHints`，保留提示、源位置并附段号 `part` 和拆分稿路径 `source`；`sentences.md` 另设提示区。提示不进入 `sentences`、`captions` 或章节标题，也不推断独立时间。含提示的旧任务先重跑 `check_tts.py --alignment-dir` 与音频交接，以免旧 alignment 将提示还原到字幕。
+
+第二步分镜草案按台词定位；配音后使用这里的时间轴完善执行分镜，不从草案文字猜测音频时间。
+
+标题只展示时，检查加 `--visual-headings` 并重建交接。准备工具利用标题源行号定位其后第一段口播或 `>` 桥接，章节时间标为 `following_speech_start`；落在句中时标为 `following_speech_interpolation_estimate`。没有可用口播的纯视觉章节须另行安排；旧音轨读标题时继续按标题朗读位置定位。
 
 句子时间来自 MiniMax 同次字幕，多段按实际时长累加偏移。字幕默认 `--captions source`：用 alignment 把读法还原为原稿公式（如“A 竖线 C”显示为 `A|C`），过长公式（默认显示宽度超过 30）回退为朗读文字并在 `spokenFallbackFormulas` 中列出；`--captions spoken` 直接用朗读文字。`--caption-width 24` 控制每条字幕的显示宽度（ASCII 计 0.55），切分优先在标点处，长句均分，不在英文单词中间断开。
 
-上述为工具默认值；视频简读流程显式传入 `--captions spoken`，字幕跟随简短口播，完整公式由分镜绘制在主画面。公式读法为空时没有可映射的朗读字符，工具不会自动生成它的字幕、展示时长或镜头；须依据 `videoHints` 和相邻解释句安排。`spokenFallbackFormulas` 也不能作为所有省读公式的清单，仍需阅读原稿与 `改动说明.md`。
+上述为工具默认值；视频简读流程显式传入 `--captions spoken`，字幕跟随实际口播，完整公式由分镜绘制在主画面。公式读法为空时没有可映射的朗读字符，工具不会自动生成它的字幕、展示时长或镜头；须依据 `videoHints` 和相邻解释句安排。`spokenFallbackFormulas` 也不能作为所有省读公式的清单，仍需阅读原稿与 `改动说明.md`。
 
 ## 分镜接口
 
@@ -57,7 +61,7 @@ export const duration = P.duration;
 - `T.t` 是场景内秒数，`T.dur` 场景时长，`T.abs` 全片秒数，`T.b(i)` 是距第 i 个节拍的秒数，未到时为负，超出节拍数时为 `-Infinity`。
 - 导出 `cover(ctx, {width, height})` 时，`render.mjs cover` 输出 16:9（1920×1080）和 4:3（1440×1080）两张封面，绘图需按 `width` 居中。
 
-无配音时可沿用 `lines` 模式：场景给 `chapter` 和 `lines: ['句子', ['需要停留的句子', 1]]`，按阅读速度估算时间并烧录字幕，结果标注 `reading_speed_estimate`；两种模式不能混用。编写 `lines` 和 `chapter` 前先排除源稿的 `<@ ... >` 提示，提示只落实在分镜与绘图中，不作为字幕文本或阅读时长输入。引擎发现 `lines`、字幕或章节标题残留 `<@` 时会报错，要求先修正。
+无配音时可沿用 `lines` 模式：场景给 `chapter` 和 `lines: ['句子', ['需要停留的句子', 1]]`，按阅读速度估算字幕时间，并为复杂上屏材料增加观察时间后烧录字幕，结果标注 `reading_speed_estimate`；两种模式不能混用。编写 `lines` 和 `chapter` 前先排除源稿的 `<!-- visual: ... -->` 提示，去掉桥接引用前缀；提示只落实在分镜与绘图中，不作为字幕文本或阅读时长输入。引擎发现 `lines`、字幕或章节标题残留 HTML 注释或已停用标记 时会报错，要求先修正。
 
 ## 调用
 

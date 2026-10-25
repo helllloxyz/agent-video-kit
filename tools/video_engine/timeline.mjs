@@ -2,7 +2,7 @@
 const visibleLength = (s) => [...s.replace(/[\s，。、：；“”"‘’（）()？！…—,.:;?!]/g, '')].length;
 const positive = (v) => Number.isFinite(v) && v > 0;
 function checkVideoHints(text) {
-  if (text.includes('<@')) throw new Error('字幕或章节标题残留视频制作提示 <@ ... >；请先排除提示，再安排字幕与阅读时长');
+  if (/<[@*]|<!--|-->/.test(text)) throw new Error('字幕或章节标题残留视频制作提示或 HTML 注释；请先排除提示，再安排字幕与阅读时长');
 }
 
 export function splitCaption(text, maxChars = 30) {

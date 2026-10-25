@@ -7,9 +7,9 @@ import re
 import sys
 
 if __package__:
-    from .video_hints import strip_video_hints
+    from .video_hints import strip_source_comments
 else:
-    from video_hints import strip_video_hints
+    from video_hints import strip_source_comments
 
 
 HEADING = re.compile(r"^ {0,3}##(?:[ \t]+(.*)|[ \t]*)$")
@@ -18,7 +18,7 @@ FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\r\n]*)$")
 
 def split_sections(text):
     """保留原文与换行；导语归第一节，忽略围栏代码和 YAML front matter。"""
-    lines = strip_video_hints(text, preserve_layout=True).splitlines(keepends=True)
+    lines = strip_source_comments(text, preserve_layout=True).splitlines(keepends=True)
     headings = []
     fence = None
     in_frontmatter = False

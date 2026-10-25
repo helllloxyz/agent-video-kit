@@ -24,9 +24,9 @@ cp .env.example .env
 
 > /完整路径/讲稿.md
 
-只给讲稿或路径时，默认完成章节拆分、朗读适配、纯脚本检查与字符串对齐、MiniMax 配音，按拆分段交付独立音频后停止，不拼接；无需重复说明步骤。明确要求“只转写”“先看文本”“暂不配音”时停在文本阶段。输出在独立的 `outputs/` 子目录中，保留原稿。视频由后续负责视频的模型接收任务清单和音频继续制作。
+只给讲稿或路径时，默认完成口播与画面适配、章节拆分、TTS 提取、纯脚本检查与字符串对齐、MiniMax 配音，按拆分段交付独立音频后停止，不拼接；无需重复说明步骤。明确要求“只转写”“先看文本”“暂不配音”时停在文本阶段。输出在独立的 `outputs/` 子目录中，保留原稿。视频由后续负责视频的模型接收任务清单和音频继续制作。
 
-公式默认按有视频画面的用途简读：画面完整展示 LaTeX，语音优先讲关系、变化和理解重点，不逐项复述长公式；相邻正文已讲清的重复公式可以只展示。需要的公式展示提示在任务 `source/` 副本补充，用户原稿不变，再拆分、检查和配音。视频字幕默认跟随简短口播，完整公式单独上屏。明确要求“纯音频，脱离画面也能听懂”或“公式逐项读出”时使用完整读法；具体边界见 [TTS 转写 Prompt](docs/tts_rewrite_prompt.md)。
+公式默认按有视频画面的用途简读：画面完整展示 LaTeX，语音优先讲关系、变化和理解重点，不逐项复述长公式；相邻正文已讲清的重复公式可以只展示。视频与分镜设计阶段在任务 `source/` 保存适配稿，尽量保留原文，补齐完整上屏材料与必要的引导、桥接，输入文章不变，再拆分、提取、检查和配音。口播按画面观察顺序讲清关键关系，为复杂材料留足理解时间，不以简短为目标；视频字幕默认跟随实际口播，完整公式单独上屏。明确要求“纯音频，脱离画面也能听懂”或“公式逐项读出”时使用完整读法；具体边界见 [TTS 转写 Prompt](docs/tts_rewrite_prompt.md)。
 
 还可以请求：
 
@@ -36,20 +36,29 @@ cp .env.example .env
 
 > 将这份讲稿做成无声视频，烧录字幕，供后期配音。
 
-讲稿可加入 `<@ ... >` 指导动画，例如：`两点逐渐靠近。<@ 让点 B 沿曲线向点 A 移动，割线随之转动 >`。标记内的内容保留在原稿中，只用于分镜和画面，不朗读、不进字幕，也不额外计算朗读时长。支持独立行及跨行，不支持嵌套。普通 `<...>` 不作为提示；完整规则见 [视频制作提示约定](docs/video_hints.md)。
+讲稿用 `<!-- visual: ... -->` 保存画面资料与制作安排，不朗读、不进口播字幕。`<!-- author: ... -->` 是作者要求，由整理阶段落实后去除；适配稿中的 `>` 是需要朗读的桥接、过场；第一步文章的引用仍按正常文章语义理解。统一使用上述 HTML 注释语法，两种旧标记均已停用；完整规则见 [视频制作提示约定](docs/video_hints.md)。
 
 ## 资源与目录
 
-如果输入仍是零散思路，可先使用[初稿整理 Prompt](docs/draft_to_manuscript_prompt.md)生成完整 Markdown 科普文稿，数学公式保留 LaTeX 格式。`## ？` 表示需要补标题，`<* ... >` 表示作者说明；输出保留大纲层级和顺序，并主动构思动态可视化例子，用 `<@ ... >` 留给后续视频制作。此阶段只写文稿，作者审阅后再进入朗读适配和配音。
+文字流程分为三个可独立迭代的步骤：
+
+| 步骤 | 工作与产物 |
+| --- | --- |
+| [1. 文稿整理](docs/draft_to_manuscript_prompt.md) | 把初稿整理为完整、可独立阅读的科普文章，保留公式、推导与表格，可附 visual 想法。 |
+| [2. 视频与分镜设计](docs/manuscript_to_storyboard_prompt.md) | 尽量维持原文，安排画面材料与镜头变化，只补必要的画面引导、解释与桥接；输出适配稿和分镜草案。 |
+| [3. TTS 音频化](docs/tts_rewrite_prompt.md) | 从确定的适配稿提取台词，结合画面处理发音、公式讲解、格式与停顿，复核观察节奏；必要补充先回写适配稿，输出 TTS 和检查记录。 |
+
+第二步继续思考并优化 `visual`，不照搬第一步的备忘，也不为口播整体改写文章。严格字符串检查针对“适配稿 → TTS”；“文章 → 适配稿”检查必要调整与内容完整性。配音后，视频制作将分镜草案绑定到实际音轨并渲染；仅请求前面某一步时停在该步。
 
 | 资源 | 用途 |
 | --- | --- |
 | [AGENTS.md](AGENTS.md) | 音频/视频职责、默认任务路由及交接约定 |
 | [docs/audio_workflow.md](docs/audio_workflow.md) | 音频模型按需加载：拆分、转写、脚本对齐、合成、检查和音频交付 |
 | [docs/video_workflow.md](docs/video_workflow.md) | 视频执行步骤、共享环境、检查和交付规格 |
-| [docs/video_hints.md](docs/video_hints.md) | `<@ ... >` 视频提示的写法、朗读排除及交接规则 |
-| [docs/tts_rewrite_prompt.md](docs/tts_rewrite_prompt.md) | TTS 文稿适配规则、正文与公式转换约束 |
-| [docs/draft_to_manuscript_prompt.md](docs/draft_to_manuscript_prompt.md) | 初稿整理为 Markdown 科普文稿，保留 LaTeX 公式并附动态可视化制作提示 |
+| [docs/video_hints.md](docs/video_hints.md) | `<!-- visual: ... -->` 视频提示的写法、朗读排除及交接规则 |
+| [docs/manuscript_to_storyboard_prompt.md](docs/manuscript_to_storyboard_prompt.md) | 第二步：视频表达、完整画面材料与分镜草案 |
+| [docs/tts_rewrite_prompt.md](docs/tts_rewrite_prompt.md) | 第三步：必要的音频化转换与严格文本检查 |
+| [docs/draft_to_manuscript_prompt.md](docs/draft_to_manuscript_prompt.md) | 初稿整理为 Markdown 科普文稿，保留完整知识与 LaTeX，可附 visual 备忘 |
 | [docs/video_prompt.md](docs/video_prompt.md) | 科普视频的视觉风格、内容表达和画面节奏 |
 | [tools/minimax_tts.py](tools/minimax_tts.py) | MiniMax 请求、音频/字幕保存、时间轴、分镜表及响应恢复，也可作为 Python 模块调用 |
 | [tools/check_tts.py](tools/check_tts.py) | 朗读文本与原稿逐字核对和标签检查 |
@@ -68,11 +77,13 @@ cp .env.example .env
 讲稿默认按顶层 `##` 切分，相邻完整章节合并，每份源稿最多 3000 字符；单章超限时报错，不自动拆段落。可用 `--max-chars`（或 `--max-char`）调整。TTS 适配时每份稿末尾默认加入 `<#0.8#>`，为后续配音拼接留出间隔。
 
 ```bash
-python3 tools/split_markdown.py 讲稿.md --output-dir outputs/本次任务/parts
-# 完成 TTS 适配后，检查正文并导出字符串对齐记录
+python3 tools/split_markdown.py outputs/本次任务/source/讲稿_适配稿.md --output-dir outputs/本次任务/parts
+# 从拆分适配稿提取 TTS 后，检查台词并导出字符串对齐记录
 python3 tools/check_tts.py outputs/本次任务/parts outputs/本次任务/tts \
-  --alignment-dir outputs/本次任务/alignment
+  --alignment-dir outputs/本次任务/alignment --visual-headings
 ```
+
+`--visual-headings` 用于标题只展示的视频口播；纯音频或复查原有已读标题的任务时不加，避免改变既有检查口径。
 
 字符对齐记录包含参与适配的源稿行号、TTS 字符范围与公式读法，并单独记录不朗读的 `videoHints`，不含音频时间；公式简读含义与画面承接仍需逐条审阅。空公式读法会给出警告，须记录省读理由和展示安排，不意味着已有展示时间。使用任务副本时，行号属于副本；转写可能使文本增长，合成前另查 9000 UTF-16 字符上限。
 
