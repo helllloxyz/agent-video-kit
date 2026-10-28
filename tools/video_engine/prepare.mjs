@@ -56,7 +56,7 @@ function main() {
     }).filter(Boolean);
     if (cursor !== N.length) warnings.push(`第 ${index + 1} 段末尾 ${N.length - cursor} 个朗读字符没有字幕时间`);
     for (const {s, range} of local) {
-      const mapped = v.captions === 'source' && alignment ? sentenceUnits(rawSlice(range), range[0], segments) : {units: [...rawSlice(range)].map((ch) => ({text: ch, weight: /\s/.test(ch) ? 0 : 1})), spokenFallback: 0};
+      const mapped = alignment ? sentenceUnits(rawSlice(range), range[0], segments, {captionMode: v.captions}) : {units: [...rawSlice(range)].map((ch) => ({text: ch, weight: /\s/.test(ch) ? 0 : 1})), spokenFallback: 0};
       for (const src of mapped.fallbackSources ?? []) spokenFallback.add(src.replace(/\s+/g, ' ').slice(0, 80));
       sentences.push({id: sentences.length, part: index + 1, start: sec(offset + s.startMs), end: sec(offset + s.endMs),
         spoken: rawSlice(range).replace(/\s+/g, ' '), text: mapped.units.map((u) => u.text).join('').trim(), units: mapped.units, range});

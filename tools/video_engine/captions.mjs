@@ -143,7 +143,7 @@ function sourcePieces(sourceText) {
 // Replacement segments covering several formulas are split when spoken lines match one-to-one.
 export function expandSegments(segments) {
   return segments.flatMap((seg) => {
-    if (seg.kind === 'literal') return [seg];
+    if (seg.kind === 'literal' || seg.kind === 'caption_annotation') return [seg];
     const src = sourcePieces(seg.sourceText);
     const spoken = seg.ttsText.split(/<#[^<>]*?#>|\n+/).filter((p) => normalizeSpoken(p));
     if (src.length < 2 || src.length !== spoken.length) return [seg];
@@ -160,14 +160,24 @@ export function expandSegments(segments) {
 // Short formulas are restored from the source and repeated in every sentence that reads them;
 // long or multi-line ones fall back to the spoken words of that sentence.
 export function sentenceUnits(rawText, rangeStart, segments, options = {}) {
-  const {maxFormulaWidth = 30} = options;
+  const {maxFormulaWidth = 30, captionMode = 'source'} = options;
   const units = [], shownUnit = new Map(), fallbackSegs = new Set();
   let p = rangeStart;
   const segAt = (pos) => segments.find((s) => pos >= s.ttsNormalizedRange[0] && pos < s.ttsNormalizedRange[1]);
   for (const ch of cleanSpoken(rawText)) {
     if (/\s/.test(ch)) { units.push({text: ' ', weight: 0}); continue; }
     const seg = segAt(p++);
-    if (!seg || seg.kind === 'literal') { units.push({text: ch, weight: 1}); continue; }
+    if (seg?.kind === 'caption_annotation') {
+      // Preserve the spoken name, attach its unspoken suffix at the final name character.
+      // Its weight comes entirely from speech; no new audio time is invented.
+      const suffix = seg.sourceText.match(/[（(][^（）()]+[）)]$/u)[0];
+      const previous = units[units.length - 1];
+      if (previous?.annotation === seg) { previous.text += ch; previous.weight++; }
+      else units.push({text: ch, weight: 1, atomic: true, annotation: seg});
+      if (p === seg.ttsNormalizedRange[1]) units[units.length - 1].text += suffix;
+      continue;
+    }
+    if (!seg || seg.kind === 'literal' || captionMode === 'spoken') { units.push({text: ch, weight: 1}); continue; }
     const shown = sourceDisplay(seg.sourceText);
     if (displayWidth(shown) > maxFormulaWidth || /；/.test(shown)) { fallbackSegs.add(seg); units.push({text: ch, weight: 1}); continue; }
     if (shownUnit.has(seg)) { shownUnit.get(seg).weight++; continue; }

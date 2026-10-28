@@ -257,3 +257,53 @@ test('aligned rows split on line breaks and the first ampersand', {skip: !ready}
   const {alignedRows} = await import('../tools/video_engine/lib.mjs');
   assert.deepEqual(alignedRows(String.raw`\begin{aligned} P &= 1 - Q \\ &= R \end{aligned}`), [['P', '= 1 - Q'], ['', '= R']]);
 });
+
+test('unspoken English annotations survive spoken captions without restoring formulas', () => {
+  const segs = [
+    {kind: 'caption_annotation', sourceText: '阿采尔（J. Aczél）', ttsText: '阿采尔', ttsNormalizedRange: [0, 3]},
+    {kind: 'replacement', sourceText: '$x^2$', ttsText: '平方', ttsNormalizedRange: [4, 6]},
+  ];
+  const result = sentenceUnits('阿采尔说平方。', 0, segs, {captionMode: 'spoken'});
+  assert.equal(result.units.map(u => u.text).join(''), '阿采尔（J. Aczél）说平方。');
+  assert.equal(result.units.reduce((n, u) => n + u.weight, 0), 7);
+  assert.ok(splitUnits(result.units, 5).some(p => p.text.includes('阿采尔（J. Aczél）')));
+  // A service boundary inside a name never repeats its spoken prefix or the supplement.
+  assert.equal(sentenceUnits('阿采', 0, segs, {captionMode: 'spoken'}).units.map(u => u.text).join(''), '阿采');
+  assert.equal(sentenceUnits('尔说', 2, segs, {captionMode: 'spoken'}).units.map(u => u.text).join(''), '尔（J. Aczél）说');
+  const long = [{kind: 'caption_annotation', sourceText: '术语（A very long English supplementary terminology name）', ttsText: '术语', ttsNormalizedRange: [0, 2]}];
+  assert.match(sentenceUnits('术语', 0, long).units.map(u => u.text).join(''), /supplementary/);
+});
+
+test('caption annotation CLI alignment reaches prepared spoken captions', {skip: !ready}, () => {
+  const temp = mkdtempSync(join(tmpdir(), 'caption-annotation-'));
+  try {
+    for (const dir of ['parts', 'tts', 'alignment', 'audio/001']) mkdirSync(join(temp, dir), {recursive: true});
+    const source = join(temp, 'source.md'), part = join(temp, 'parts/001.md'), tts = join(temp, 'tts/001_TTS.txt');
+    const manuscript = '## 标题\n阿采尔（J. Aczél）解释 $x^2$。';
+    const spoken = '阿采尔解释平方。<#0.8#>';
+    writeFileSync(source, manuscript); writeFileSync(part, manuscript); writeFileSync(tts, spoken);
+    const config = join(temp, 'caption_annotations.json');
+    writeFileSync(config, JSON.stringify([{sourceText: '阿采尔（J. Aczél）', spokenText: '阿采尔'}]));
+    const py = (script, args) => spawnSync('python3', [join(root, 'tools', script), ...args], {encoding: 'utf8', env: {...process.env, FFMPEG: sharedFfmpeg()}, timeout: 30000});
+    const checked = py('check_tts.py', [part, tts, '--visual-headings', '--caption-annotations', config, '--alignment-dir', join(temp, 'alignment')]);
+    assert.equal(checked.status, 0, checked.stdout + checked.stderr);
+    const audio = join(temp, 'audio/001');
+    assert.equal(spawnSync(sharedFfmpeg(), ['-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=32000', '-t', '2', join(audio, 'speech.mp3')]).status, 0);
+    writeFileSync(join(audio, 'request.json'), JSON.stringify({text: spoken}));
+    writeFileSync(join(audio, 'result.json'), JSON.stringify({ok: true, voiceId: 'local-test', warnings: []}));
+    writeFileSync(join(audio, 'timeline.json'), JSON.stringify({subtitles: [{text: '阿采尔解释平方。', startMs: 0, endMs: 1800}]}));
+    const handoff = py('audio_handoff.py', [temp, '--source', source]);
+    assert.equal(handoff.status, 0, handoff.stdout + handoff.stderr);
+    for (const mode of ['spoken', 'source']) {
+      const out = join(temp, mode);
+      const prepared = spawnSync(process.execPath, [join(root, 'tools/video_engine/prepare.mjs'), '--job', temp, '--captions', mode, '--output-dir', out], {encoding: 'utf8', timeout: 30000});
+      assert.equal(prepared.status, 0, prepared.stderr);
+      const timeline = JSON.parse(readFileSync(join(out, 'timeline.json'), 'utf8'));
+      const caption = timeline.captions.map(c => c.text).join('');
+      assert.match(caption, /阿采尔（J\. Aczél）/);
+      assert.match(caption, mode === 'spoken' ? /平方/ : /x²/);
+      assert.equal(timeline.sentences[0].spoken, '阿采尔解释平方。');
+      assert.ok(timeline.captions.every(c => c.end > c.start && c.end <= 1.8));
+    }
+  } finally { rmSync(temp, {recursive: true, force: true}); }
+});

@@ -68,10 +68,16 @@ async function main() {
     const cap = TL.captions.find((x) => t >= x.start && t < x.end);
     if (cap) {
       const alpha = clamp(Math.min((t - cap.start) / 0.12, (cap.end - t) / 0.12));
-      const size = Math.min(CAPTION.size, CAPTION.size * (W - 160) / Math.max(1, textWidth(cap.text, CAPTION.size, STYLE.caption)));
-      const w = textWidth(cap.text, size, STYLE.caption) + 56;
-      rect(ctx, (W - w) / 2, CAPTION.top, w, 64, {fill: '#000000', alpha: 0.5 * alpha, r: 12});
-      drawText(ctx, cap.text, W / 2, CAPTION.top + 33, {size, color: C.white, alpha, kind: STYLE.caption});
+      if (typeof module.drawCaption === 'function') {
+        ctx.save();
+        module.drawCaption(ctx, cap, {time: t, alpha, width: W, height: H, top: CAPTION.top, size: CAPTION.size});
+        ctx.restore();
+      } else {
+        const size = Math.min(CAPTION.size, CAPTION.size * (W - 160) / Math.max(1, textWidth(cap.text, CAPTION.size, STYLE.caption)));
+        const w = textWidth(cap.text, size, STYLE.caption) + 56;
+        rect(ctx, (W - w) / 2, CAPTION.top, w, 64, {fill: '#000000', alpha: 0.5 * alpha, r: 12});
+        drawText(ctx, cap.text, W / 2, CAPTION.top + 33, {size, color: C.white, alpha, kind: STYLE.caption});
+      }
     }
     ctx.restore();
   }

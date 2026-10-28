@@ -68,9 +68,32 @@ def offset_to_line(text, offset):
     return text.count("\n", 0, offset) + 1
 
 
-def parse_source(src, visual_headings=False):
+def validate_caption_annotations(entries):
+    """Explicit, reviewed name + parenthetical mappings; never infer omissions."""
+    if not isinstance(entries, list):
+        raise ValueError("字幕补注清单必须是 JSON 数组")
+    seen = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("字幕补注条目必须含 sourceText 和 spokenText")
+        source, spoken = entry.get("sourceText"), entry.get("spokenText")
+        if not isinstance(source, str) or not isinstance(spoken, str) or not spoken.strip():
+            raise ValueError("字幕补注必须有非空原文与中文名称读法")
+        suffix = source[len(spoken):] if source.startswith(spoken) else ""
+        if (not re.fullmatch(r"[（(][^（）()\n]+[）)]", suffix)
+                or not re.search(r"[A-Za-z]{2}", suffix)
+                or re.search(r"[0-9$=<>\\]|[\ue000\ue001]", source)
+                or "\n" in source or not re.search(r"[\u3400-\u9fff]", spoken)
+                or source in seen):
+            raise ValueError("字幕补注只允许明确列出的中文名称及其英文括号补注，不能改写正文或公式")
+        seen.add(source)
+    return entries
+
+
+def parse_source(src, visual_headings=False, caption_annotations=None):
     """返回 (parts, gaps)。parts 由 ('lit', 文本, 行号列表) 和 ('gap', [gap 下标]) 交替组成。"""
     gaps = []
+    annotations = validate_caption_annotations([] if caption_annotations is None else caption_annotations)
 
     def new_gap(kind, text, line):
         gaps.append(Gap(kind, text, line))
@@ -94,6 +117,13 @@ def parse_source(src, visual_headings=False):
     items = []  # ('c', 字符, 行号) 或 ('g', gap 下标)
     for lineno, line in enumerate(text.split("\n"), start=1):
         line = process_line(line, lineno, new_gap)
+        for entry in annotations:
+            source = entry["sourceText"].replace("(", "（").replace(")", "）")
+            def annotate(match):
+                token = new_gap("字幕补注", entry["sourceText"], lineno)
+                gaps[-1].expected_reading = normalize_output(entry["spokenText"])
+                return token
+            line = re.sub(re.escape(source), annotate, line)
         pos = 0
         for m in GAP_TOKEN_RE.finditer(line):
             items.extend(("c", ch, lineno) for ch in line[pos:m.start()] if not ch.isspace())
@@ -191,12 +221,19 @@ def compare(parts, gaps, out_norm, alignment=None):
             alignment.append(replacement_span(gaps, pending, pos, len(out_norm), out_norm))
     elif pending is None and pos < len(out_norm):
         errors.append(f"输出末尾多出源文没有的文字：“{clip(out_norm[pos:], 40)}”")
+    for part in parts:
+        if part[0] != "gap":
+            continue
+        for gid in part[1]:
+            gap = gaps[gid]
+            if gap.kind == "字幕补注" and (len(part[1]) != 1 or gap.reading != gap.expected_reading):
+                errors.append(f"源第 {gap.line} 行字幕补注必须独立映射且只读：{gap.expected_reading}")
     return errors
 
 
 def replacement_span(gaps, ids, start, end, out_norm):
     group = [gaps[gid] for gid in ids]
-    return {"kind": "replacement", "sourceLines": [group[0].line,
+    return {"kind": "caption_annotation" if len(group) == 1 and group[0].kind == "字幕补注" else "replacement", "sourceLines": [group[0].line,
             max(g.line + g.text.count("\n") for g in group)],
             "sourceText": " ".join(g.text for g in group),
             "replacementKinds": [g.kind for g in group],
@@ -302,12 +339,12 @@ def md_cell(s):
     return clip(s.replace("\n", " ").replace("|", "\\|"), 120)
 
 
-def check_pair(src_path, out_path, alignment_path=None, visual_headings=False):
+def check_pair(src_path, out_path, alignment_path=None, visual_headings=False, caption_annotations=None):
     src = src_path.read_text(encoding="utf-8")
     out = out_path.read_text(encoding="utf-8")
     try:
         hints = video_hints(src)
-        parts, gaps = parse_source(src, visual_headings=visual_headings)
+        parts, gaps = parse_source(src, visual_headings=visual_headings, caption_annotations=caption_annotations)
     except ValueError as error:
         if alignment_path is not None:
             alignment_path.parent.mkdir(parents=True, exist_ok=True)
@@ -417,7 +454,12 @@ def main():
     parser.add_argument("output", type=Path, help="TTS 文本文件或输出目录")
     parser.add_argument("--alignment-dir", type=Path, help="另存原文与 TTS 字符串对齐 JSON；无音频时间")
     parser.add_argument("--visual-headings", action="store_true", help="井号标题只展示，不参与朗读比对；源稿标题保持不变")
+    parser.add_argument("--caption-annotations", type=Path, help="英文补注清单 JSON：sourceText 保留字幕，spokenText 只读中文名称")
     args = parser.parse_args()
+    try:
+        annotations = validate_caption_annotations(json.loads(args.caption_annotations.read_text(encoding="utf-8"))) if args.caption_annotations else []
+    except (ValueError, OSError) as error:
+        parser.error(str(error))
 
     if not args.source.exists():
         sys.exit(f"源路径不存在：{args.source}")
@@ -433,7 +475,7 @@ def main():
         if args.alignment_dir:
             relative = Path(src_path.name) if args.source.is_file() else src_path.relative_to(args.source)
             alignment_path = args.alignment_dir / relative.with_suffix(".alignment.json")
-        report, ok = check_pair(src_path, out_path, alignment_path, visual_headings=args.visual_headings)
+        report, ok = check_pair(src_path, out_path, alignment_path, visual_headings=args.visual_headings, caption_annotations=annotations)
         reports.append(report)
         all_ok = all_ok and ok
 

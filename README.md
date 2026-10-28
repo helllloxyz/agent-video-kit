@@ -85,6 +85,8 @@ python3 tools/check_tts.py outputs/本次任务/parts outputs/本次任务/tts \
 
 `--visual-headings` 用于标题只展示的视频口播；纯音频或复查原有已读标题的任务时不加，避免改变既有检查口径。
 
+中文姓名或术语后的补充英文默认不进入 TTS，原稿与字幕保留；逐处审阅后保存 `caption_annotations.json`，检查追加 `--caption-annotations`，以明确映射恢复字幕，不自动删除所有括号内容。详见 [TTS 补注规则](docs/tts_rewrite_prompt.md#英文补注不朗读字幕保留)。
+
 字符对齐记录包含参与适配的源稿行号、TTS 字符范围与公式读法，并单独记录不朗读的 `videoHints`，不含音频时间；公式简读含义与画面承接仍需逐条审阅。空公式读法会给出警告，须记录省读理由和展示安排，不意味着已有展示时间。使用任务副本时，行号属于副本；转写可能使文本增长，合成前另查 9000 UTF-16 字符上限。
 
 已有任务后来补入视频提示时，按 [旧任务接续步骤](docs/video_hints.md#已有任务补入提示) 更新对齐与交接；提交的 TTS 文本未变时复用原有音频。
@@ -93,7 +95,7 @@ python3 tools/check_tts.py outputs/本次任务/parts outputs/本次任务/tts \
 
 ```bash
 python3 -m unittest discover -s tests -v
-node --test tests/video_engine.test.mjs
+node --test tests/*.test.mjs
 ```
 
 音频交接测试需要可用的 FFmpeg；视频完整测试需要先按 [视频环境配置](docs/video_workflow.md#环境与技术) 安装共享依赖，未安装时会跳过依赖渲染环境的用例。

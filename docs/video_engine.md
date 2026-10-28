@@ -60,6 +60,7 @@ export const duration = P.duration;
 - 可选 `fadeIn`/`fadeOut`（秒，默认 0.5/0.6，0 表示直切，同一章节连续镜头建议直切）；`label: false` 隐藏左上章节标签，或给字符串覆盖。
 - `T.t` 是场景内秒数，`T.dur` 场景时长，`T.abs` 全片秒数，`T.b(i)` 是距第 i 个节拍的秒数，未到时为负，超出节拍数时为 `-Infinity`。
 - 导出 `cover(ctx, {width, height})` 时，`render.mjs cover` 输出 16:9（1920×1080）和 4:3（1440×1080）两张封面，绘图需按 `width` 居中。
+- 可选导出 `drawCaption(ctx, caption, {time, alpha, width, height, top, size})`，替代默认烧录字幕绘制，适用于中文与数学字体混排。`caption.text` 仍用于 SRT 导出，字幕起止时间不变；`top` 为字幕安全区顶部，`alpha` 为进出透明度。回调须自行绘制背景、文本并限制宽高。渲染器在回调前后保存和恢复画布状态；未导出时保留默认字幕样式。
 
 无配音时可沿用 `lines` 模式：场景给 `chapter` 和 `lines: ['句子', ['需要停留的句子', 1]]`，按阅读速度估算字幕时间，并为复杂上屏材料增加观察时间后烧录字幕，结果标注 `reading_speed_estimate`；两种模式不能混用。编写 `lines` 和 `chapter` 前先排除源稿的 `<!-- visual: ... -->` 提示，去掉桥接引用前缀；提示只落实在分镜与绘图中，不作为字幕文本或阅读时长输入。引擎发现 `lines`、字幕或章节标题残留 HTML 注释或已停用标记 时会报错，要求先修正。
 
@@ -104,7 +105,7 @@ node tools/video_engine/check.mjs --video "$VIDEO_OUTPUT/film.mp4" --output-dir 
 ## 验证
 
 ```bash
-node --test tests/video_engine.test.mjs
+node --test tests/*.test.mjs
 ```
 
 测试覆盖时间轴与章节合并、字幕切分和公式还原、视频提示从文本到音频交接再到视频准备的传递与泄漏拦截、分镜句子换算、公式排版、参数校验和本地短片渲染，不访问配音接口；渲染测试需要已安装共享依赖。实际任务仍按视频流程检查静帧、成片和章节覆盖。
