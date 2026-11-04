@@ -89,7 +89,7 @@ export const fontStr = (kind, size, weight = '') => `${slanted(kind) ? 'italic '
 function measure(ch, kind, size) { measureCanvas.font = fontStr(kind, size); return measureCanvas.measureText(ch).width; }
 
 // ---------- a tiny TeX-like layout engine ----------
-// Supports: ^{} _{} \frac{}{} \sqrt{} \overline{} \big…\Bigg \c{color}{} \t{中文} \op{ln} \m{name}{} \, \; and plain characters.
+// Supports: ^{} _{} \frac{}{} (\tfrac, \dfrac) \sqrt{} \overline{} (\bar) \hat{} \big…\Bigg \c{color}{} \t{中文} \op{ln} \m{name}{} \, \; and plain characters.
 const SYM = {
   cdot: '·', times: '×', div: '÷', pm: '±', ast: '∗', circ: '∘', infty: '∞', to: '→', rightarrow: '→', leftarrow: '←', mapsto: '↦', longrightarrow: '⟶',
   Rightarrow: '⇒', Leftarrow: '⇐', Leftrightarrow: '⇔', Longrightarrow: '⟹', implies: '⟹', iff: '⟺',
@@ -97,7 +97,9 @@ const SYM = {
   le: '≤', ge: '≥', leq: '≤', geq: '≥', gt: '>', lt: '<', neq: '≠', ne: '≠', approx: '≈', equiv: '≡', propto: '∝', mid: '|', vert: '|',
   ldots: '…', cdots: '⋯', dots: '…', partial: '∂', sum: '∑', prod: '∏', int: '∫', R: 'ℝ', prime: '′',
   alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', theta: 'θ', lambda: 'λ', mu: 'μ', pi: 'π', sigma: 'σ', tau: 'τ', phi: 'ϕ', omega: 'ω',
-  Delta: 'Δ', Sigma: 'Σ', Omega: 'Ω',
+  kappa: 'κ', rho: 'ρ', nu: 'ν', xi: 'ξ', eta: 'η', zeta: 'ζ', psi: 'ψ', chi: 'χ', varepsilon: 'ε', varphi: 'φ',
+  Delta: 'Δ', Sigma: 'Σ', Omega: 'Ω', Gamma: 'Γ', Lambda: 'Λ', Phi: 'Φ', Psi: 'Ψ', Theta: 'Θ', Pi: 'Π',
+  uparrow: '↑', downarrow: '↓', langle: '⟨', rangle: '⟩', hbar: 'ℏ', ell: 'ℓ', nabla: '∇', sim: '∼', ll: '≪', gg: '≫',
 };
 const BIG = { big: 1.2, Big: 1.45, bigg: 1.7, Bigg: 2 };
 function parse(s) {
@@ -132,8 +134,9 @@ function parse(s) {
         if (SYM[name]) { out.push({ type: 'ch', ch: SYM[name] }); continue; }
         if (name === 'left' || name === 'right') continue;
         if (name === 'sqrt') { out.push({ type: 'sqrt', items: arg() }); continue; }
-        if (name === 'overline') { out.push({ type: 'overline', items: arg() }); continue; }
-        if (name === 'frac') { const num = arg(), den = arg(); out.push({ type: 'frac', num, den }); continue; }
+        if (name === 'overline' || name === 'bar') { out.push({ type: 'overline', items: arg() }); continue; }
+        if (name === 'hat') { out.push({ type: 'hat', items: arg() }); continue; }
+        if (name === 'frac' || name === 'tfrac' || name === 'dfrac') { const num = arg(), den = arg(); out.push({ type: 'frac', num, den }); continue; }
         if (name === 'c') { const color = raw(); out.push({ type: 'color', color, items: arg() }); continue; }
         if (name === 'm') { const mark = raw(); out.push({ type: 'mark', mark, items: arg() }); continue; }
         if (name === 't' || name === 'text') { out.push({ type: 'text', str: raw(), kind: 'hei' }); continue; }
@@ -153,7 +156,7 @@ const OPS = new Set(['=', '+', '−', '-', '<', '>', '≤', '≥', '≠', '≡',
 function glyphKind(ch) {
   if (/[A-Za-zα-ωϕ]/.test(ch)) return 'it';
   if (/[\u4e00-\u9fff，。：？！“”、（）]/.test(ch)) return 'hei';
-  if (/[∘∗∫∑∏∂⁻¹⟺⇒⇐⇔⟹→⟶←↦≈≡≠∝≤≥−×÷±·…⋯∞¬∧∨∩∪∈∉⊂⊆∀∃ℝ√′]/.test(ch)) return 'sym';
+  if (/[∘∗∫∑∏∂⁻¹⟺⇒⇐⇔⟹→⟶←↦≈≡≠∝≤≥−×÷±·…⋯∞¬∧∨∩∪∈∉⊂⊆∀∃ℝ√′↑↓⟨⟩ℏℓ∇∼≪≫]/.test(ch)) return 'sym';
   return 'up';
 }
 
@@ -184,6 +187,9 @@ function layout(nodes, size, color, marks, inScript = false) {
     }
     prevCh = 'x'; prevKind = null;
     if (n.type === 'space') { box.w += size * n.w; continue; }
+    // Marks are recorded relative to the child box, then shifted as each enclosing box places it.
+    const known = {...marks};
+    const shiftNew = (dx) => { for (const k of Object.keys(marks)) if (marks[k] !== known[k]) marks[k].x += dx; };
     if (n.type === 'text') {
       const w = measure(n.str, n.kind, size);
       const chars = [...n.str];
@@ -196,6 +202,14 @@ function layout(nodes, size, color, marks, inScript = false) {
       b.rules.push({x: size * 0.04, y: -b.asc - size * 0.14, w: Math.max(size * 0.3, b.w - size * 0.04), h: Math.max(2, size * 0.04), color});
       b.asc += size * 0.22;
     }
+    else if (n.type === 'hat') {
+      b = layout(n.items, size, color, marks, inScript);
+      const hs = size * 0.9;
+      // Ascender-height bases (θ, capitals, digits, b d f …) need the accent higher than x-height letters.
+      const tall = b.glyphs.some((g) => /[A-Z0-9θδλβζξϑΘΣΔΓΛΦΨΩΠbdfhklt]/.test(g.ch));
+      b.glyphs.push({ ch: 'ˆ', kind: 'up', size: hs, color, x: b.w / 2 - measure('ˆ', 'up', hs) / 2 + (slanted(b.glyphs[0]?.kind) ? size * 0.06 : 0), y: -b.asc + size * (tall ? 0.4 : 0.62) });
+      b.asc += size * (tall ? 0.36 : 0.16);
+    }
     else if (n.type === 'big') {
       // Scale delimiters about the math axis rather than the baseline.
       const inner = layout(n.items, size * n.scale, color, marks, inScript), dy = size * 0.25 * (n.scale - 1);
@@ -207,9 +221,10 @@ function layout(nodes, size, color, marks, inScript = false) {
       b = { w: rw + inner.w + size * 0.12, asc: top + th, desc: Math.max(inner.desc, size * 0.2), glyphs: [{ ch: '√', kind: 'sym', size: rs, color, x: 0, y: size * 0.04 }], rules: [{ x: rw - size * 0.03, y: -top, w: inner.w + size * 0.12, h: th, color }] };
       for (const g of inner.glyphs) b.glyphs.push({ ...g, x: g.x + rw + size * 0.04 });
       for (const r of inner.rules) b.rules.push({ ...r, x: r.x + rw + size * 0.04 });
+      shiftNew(rw + size * 0.04);
     }
     else if (n.type === 'color') b = layout(n.items, size, C[n.color] || n.color, marks, inScript);
-    else if (n.type === 'mark') { b = layout(n.items, size, color, marks, inScript); marks[n.mark] = { x: box.w, w: b.w, asc: b.asc, desc: b.desc }; }
+    else if (n.type === 'mark') { b = layout(n.items, size, color, marks, inScript); marks[n.mark] = { x: 0, w: b.w, asc: b.asc, desc: b.desc }; }
     else if (n.type === 'script') {
       const base = layout([n.base], size, color, marks, inScript);
       b = { w: base.w, asc: base.asc, desc: base.desc, glyphs: [...base.glyphs], rules: [...base.rules] };
@@ -226,9 +241,10 @@ function layout(nodes, size, color, marks, inScript = false) {
       for (const g of num.glyphs) b.glyphs.push({ ...g, x: g.x + size * 0.06 + (w - num.w) / 2, y: g.y + axis - num.desc - size * 0.1 });
       for (const r of num.rules) b.rules.push({ ...r, x: r.x + size * 0.06 + (w - num.w) / 2, y: r.y + axis - num.desc - size * 0.1 });
       for (const g of den.glyphs) b.glyphs.push({ ...g, x: g.x + size * 0.06 + (w - den.w) / 2, y: g.y + axis + den.asc + size * 0.1 });
+      for (const r of den.rules) b.rules.push({ ...r, x: r.x + size * 0.06 + (w - den.w) / 2, y: r.y + axis + den.asc + size * 0.1 });
       b.rules.push({ x: size * 0.06, y: axis, w, h: Math.max(2, size * 0.045), color });
     }
-    if (b) { place(b, box.w, 0); box.w += b.w; box.asc = Math.max(box.asc, b.asc); box.desc = Math.max(box.desc, b.desc); }
+    if (b) { place(b, box.w, 0); shiftNew(box.w); box.w += b.w; box.asc = Math.max(box.asc, b.asc); box.desc = Math.max(box.desc, b.desc); }
     // A colored or grouped letter keeps the italic correction for what follows, e.g. "\c{gold}{f}(".
     if (b && ['color', 'group', 'mark'].includes(n.type) && b.glyphs.length) ({kind: prevKind, ch: prevCh} = b.glyphs[b.glyphs.length - 1]);
   }

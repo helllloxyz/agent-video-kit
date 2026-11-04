@@ -26,7 +26,7 @@ function main() {
   const targets = ['audio.flac', 'timeline.json', 'sentences.md'].map((f) => join(out, f));
   if (!v.overwrite && targets.some(existsSync)) throw new Error('输出已存在；使用新目录或 --overwrite');
 
-  const sentences = [], headings = [], warnings = [], videoHints = [];
+  const sentences = [], headings = [], warnings = [], videoHints = [], pendingHeadings = [];
   let offset = 0;
   const spokenFallback = new Set();
   manifest.parts.forEach((part, index) => {
@@ -70,8 +70,18 @@ function main() {
         const sourceLine = h.originalSourceLine - (part.originalSourceFirstLine ?? 1) + 1;
         const nextPeer = partHeadings.slice(headingIndex + 1).find((next) => next.level <= h.level);
         const endLine = nextPeer ? nextPeer.originalSourceLine - (part.originalSourceFirstLine ?? 1) + 1 : Infinity;
-        const anchor = alignment.segments.find((seg) => seg.sourceLines[0] > sourceLine &&
-          seg.sourceLines[0] < endLine && seg.ttsNormalizedRange[1] > seg.ttsNormalizedRange[0]);
+        const speechAfter = (limit) => alignment.segments.find((seg) => seg.sourceLines[0] > sourceLine &&
+          seg.sourceLines[0] < limit && seg.ttsNormalizedRange[1] > seg.ttsNormalizedRange[0]);
+        // A ### section heading may sit directly above a ## chapter heading, or at the very end of a part;
+        // it then starts with the next speech, which can be the first sentence of the following part.
+        const anchor = speechAfter(endLine) ?? (h.level >= 3 ? speechAfter(Infinity) : null);
+        if (!anchor && h.level >= 3 && index + 1 < manifest.parts.length) {
+          const heading = {level: h.level, title: h.title, sourceLine: h.originalSourceLine,
+            start: null, sentence: null, timing: 'following_part_speech_start'};
+          headings.push(heading);
+          pendingHeadings.push({heading, afterPart: index + 1});
+          continue;
+        }
         if (!anchor) throw new Error(`展示标题缺少后续口播定位：${h.title}；请检查源行号与 alignment，纯视觉章节需单独安排`);
         at = anchor.ttsNormalizedRange[0];
       }
@@ -88,6 +98,12 @@ function main() {
     offset += part.decodedDurationMs;
   });
   const duration = sec(offset);
+  for (const {heading, afterPart} of pendingHeadings) {
+    const next = sentences.find((s) => s.part > afterPart);
+    if (!next) throw new Error(`展示标题缺少后续口播定位：${heading.title}；纯视觉小节需单独安排`);
+    heading.start = next.start;
+    heading.sentence = next.id;
+  }
 
   const chapters = headings.filter((h) => h.level === 2);
   if (!chapters.length) throw new Error('原稿没有 ## 章节标题');

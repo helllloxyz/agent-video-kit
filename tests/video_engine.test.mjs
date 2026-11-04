@@ -202,6 +202,43 @@ for (const visualMode of [false, true]) test(`video hints survive handoff and ca
   } finally { rmSync(temp, {recursive: true, force: true}); }
 });
 
+test('visual ### sections without own speech start with the next speech, even in the next part', {skip: !ready}, () => {
+  const temp = mkdtempSync(join(tmpdir(), 'video-sections-'));
+  try {
+    const runPython = (script, args) => spawnSync('python3', [join(root, 'tools', script), ...args],
+      {encoding: 'utf8', env: {...process.env, FFMPEG: sharedFfmpeg()}, timeout: 30000});
+    const parts = [['## 第一章\n开场。\n### 小节甲\n## 第二章\n正文一。\n### 小节乙\n', '开场。正文一。<#0.8#>', ['开场。', '正文一。']],
+      ['## 第三章\n正文二。\n', '正文二。<#0.8#>', ['正文二。']]];
+    for (const dir of ['parts', 'tts', 'alignment', 'audio/001', 'audio/002']) mkdirSync(join(temp, dir), {recursive: true});
+    const source = join(temp, 'source.md');
+    writeFileSync(source, parts.map(([md]) => md).join(''));
+    parts.forEach(([md, spoken, subs], i) => {
+      const n = String(i + 1).padStart(3, '0'), audio = join(temp, 'audio', n);
+      writeFileSync(join(temp, `parts/${n}.md`), md); writeFileSync(join(temp, `tts/${n}_TTS.txt`), spoken);
+      assert.equal(spawnSync(sharedFfmpeg(), ['-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=32000', '-t', '2', join(audio, 'speech.mp3')]).status, 0);
+      writeFileSync(join(audio, 'request.json'), JSON.stringify({text: spoken}));
+      writeFileSync(join(audio, 'result.json'), JSON.stringify({ok: true, voiceId: 'local-test', warnings: []}));
+      writeFileSync(join(audio, 'timeline.json'), JSON.stringify({subtitles: subs.map((text, k) => ({text, startMs: k * 800 + 250, endMs: k * 800 + 850}))}));
+    });
+    const checked = runPython('check_tts.py', [join(temp, 'parts'), join(temp, 'tts'), '--alignment-dir', join(temp, 'alignment'), '--visual-headings']);
+    assert.equal(checked.status, 0, checked.stderr + checked.stdout);
+    const handoff = runPython('audio_handoff.py', [temp, '--source', source]);
+    assert.equal(handoff.status, 0, handoff.stderr + handoff.stdout);
+    const out = join(temp, 'video/prepared');
+    const prepared = spawnSync(process.execPath, [join(root, 'tools/video_engine/prepare.mjs'), '--job', temp, '--output-dir', out], {encoding: 'utf8', timeout: 30000});
+    assert.equal(prepared.status, 0, prepared.stderr);
+    const timeline = JSON.parse(readFileSync(join(out, 'timeline.json'), 'utf8'));
+    const [first, second] = timeline.sections;
+    assert.equal(first.title, '小节甲');
+    assert.equal(first.start, timeline.chapters[1].start);
+    assert.equal(first.sentence, 1);
+    assert.equal(second.timing, 'following_part_speech_start');
+    assert.equal(second.start, timeline.sentences[2].start);
+    assert.ok(second.start > timeline.parts[1].offset, 'leading silence is not a speech anchor');
+    assert.equal(second.sentence, 2);
+  } finally { rmSync(temp, {recursive: true, force: true}); }
+});
+
 test('math commands cannot silently disappear', {skip: !ready}, async () => {
   const {mathLayout} = await import('../tools/video_engine/lib.mjs');
   assert.throws(() => mathLayout(String.raw`\unknown{A}`, 40), /不受支持/);
@@ -215,6 +252,28 @@ test('math commands cannot silently disappear', {skip: !ready}, async () => {
   assert.equal(star?.kind, 'sym');
   assert.ok(star.x > mathLayout('a', 40).w + 40 * 0.2, 'binary ∗ gets operator spacing');
   assert.ok(mathLayout(String.raw`94\%`, 40).glyphs.some((g) => g.ch === '%'), 'escaped percent is drawn');
+  const moments = mathLayout(String.raw`\langle\varepsilon^2\rangle \kappa_n \Delta x\,\Delta p=\hbar/2 \uparrow`, 40).glyphs.map((g) => g.ch);
+  for (const ch of ['⟨', '⟩', 'ε', 'κ', 'ℏ', '↑']) assert.ok(moments.includes(ch), `${ch} is drawn`);
+  const hat = mathLayout(String.raw`\hat{\theta}`, 40), plain = mathLayout(String.raw`\theta`, 40);
+  assert.ok(hat.glyphs.some((g) => g.ch === 'ˆ') && hat.asc > plain.asc, 'hat sits above its base');
+  const nest = mathLayout(String.raw`a+\m{o}{b+\m{i}{c}}+\sqrt{\m{r}{d}}`, 40).marks, flat = mathLayout(String.raw`a+b+\m{i}{c}`, 40).marks;
+  assert.ok(Math.abs(nest.i.x - flat.i.x) < 0.5, 'a nested mark keeps its absolute position');
+  assert.ok(nest.i.x > nest.o.x && nest.i.x + nest.i.w <= nest.o.x + nest.o.w + 0.5, 'a nested mark lies inside its parent');
+  assert.ok(nest.r.x > nest.o.x + nest.o.w, 'a mark under a root follows the radical sign');
+  const accentY = (src) => mathLayout(src, 40).glyphs.find((g) => g.ch === 'ˆ').y;
+  assert.ok(accentY(String.raw`\hat{\theta}`) < accentY(String.raw`\hat{x}`) - 4, 'hat clears tall glyphs such as θ');
+  assert.ok(mathLayout(String.raw`\bar{x}`, 40).rules.length === 1);
+  assert.ok(mathLayout(String.raw`\tfrac{1}{2}`, 40).rules.length === 1);
+});
+
+test('reused math marks follow the last occurrence and denominator accents remain visible', {skip: !ready}, async () => {
+  const {mathLayout} = await import('../tools/video_engine/lib.mjs');
+  const repeated = mathLayout(String.raw`\m{focus}{a}+\m{focus}{b}`, 40);
+  assert.equal(repeated.marks.focus.x, repeated.glyphs.find((g) => g.ch === 'b').x);
+  const fraction = mathLayout(String.raw`\frac{a}{\bar{b}}`, 40);
+  assert.equal(fraction.rules.length, 2, 'fraction rule and denominator overbar are both retained');
+  assert.ok(fraction.rules[0].y > fraction.rules[1].y, 'the denominator accent sits below the fraction rule');
+  assert.ok(fraction.rules[0].y < fraction.glyphs.find((g) => g.ch === 'b').y, 'the accent stays above its denominator');
 });
 
 test('italic math (opt-in) keeps the italic correction before upright glyphs and superscripts', {skip: !ready}, async () => {
